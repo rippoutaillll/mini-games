@@ -3554,17 +3554,18 @@ window.MiniGames = (() => {
 </script>
 <!-- GAME BLOCK END -->
 
-<!-- ================================== GAME BLOCK 04 END ================================== -->
+<!-- ==================================================================================== GAME BLOCK 04 END ==================================================================================== -->
 
 
 
 
 
 
-<!-- ==========================================================================
+<!-- ==============================================================================================================================================================================
      🎮 GAME BLOCK 05
      ぴったりを狙え！銃撃紙破り
-========================================================================== -->
+============================================================================================================================================================================== -->
+
 <style>
 .gbPaperShot{
   position:fixed;
@@ -3615,6 +3616,37 @@ window.MiniGames = (() => {
   font-weight:bold
 }
 
+.gbPaperTarget .targetValue{
+  display:inline-block;
+  font-size:1.25em;
+  transform-origin:center center;
+  position:relative;
+  left:-7px
+}
+
+.gbPaperTarget .targetValue.targetActive{
+  animation:gbPaperTargetBounce .8s ease-in-out infinite
+}
+
+@keyframes gbPaperTargetBounce{
+  0%,
+  100%{
+    transform:scale(1)
+  }
+
+  40%{
+    transform:scale(1.45,.75)
+  }
+
+  60%{
+    transform:scale(.88,1.35)
+  }
+
+  78%{
+    transform:scale(1.12,.94)
+  }
+}
+
 .gbPaperMessage{
   position:absolute;
   left:50%;
@@ -3646,7 +3678,7 @@ window.MiniGames = (() => {
 .gbPaperRank{
   position:absolute;
   left:50%;
-  top:43%;
+  top:50%;
   transform:translate(-50%,-50%) scale(.1) rotate(-12deg);
   z-index:30;
   font-size:clamp(80px,15vw,165px);
@@ -3685,7 +3717,7 @@ window.MiniGames = (() => {
 
   100%{
     opacity:1;
-    transform:translate(-50%,-58%) scale(.88) rotate(0)
+    transform:translate(-50%,-50%) scale(.88) rotate(0)
   }
 }
 
@@ -4369,11 +4401,20 @@ paperCtx.globalAlpha=
       "100.0";
 
 
-    timeElement.textContent=
-      "45.0";
+timeElement.textContent=
+  "45.0";
 
 
-    rankElement.className=
+targetElement.style.visibility=
+  "hidden";
+
+
+targetElement.classList.remove(
+  "targetActive"
+);
+
+
+rankElement.className=
       "gbPaperRank";
 
 
@@ -4419,75 +4460,107 @@ paperCtx.globalAlpha=
       performance.now();
 
 
-    message.classList.add(
-      "gbPaperHidden"
+message.classList.add(
+  "gbPaperHidden"
+);
+
+
+targetElement.style.visibility=
+  "visible";
+
+
+targetElement.classList.add(
+  "targetActive"
+);
+
+  }
+
+
+function updateAimZone(){
+
+  const oldX=
+    aimZone.x;
+
+  const oldY=
+    aimZone.y;
+
+
+  if(keys.left){
+
+    aimZone.x-=
+      aimZone.speed;
+
+  }
+
+
+  if(keys.right){
+
+    aimZone.x+=
+      aimZone.speed;
+
+  }
+
+
+  if(keys.up){
+
+    aimZone.y-=
+      aimZone.speed;
+
+  }
+
+
+  if(keys.down){
+
+    aimZone.y+=
+      aimZone.speed;
+
+  }
+
+
+  aimZone.x=
+    Math.max(
+
+      aimZone.radius,
+
+      Math.min(
+        width-
+        aimZone.radius,
+        aimZone.x
+      )
+
     );
 
-  }
 
+  aimZone.y=
+    Math.max(
 
-  function updateAimZone(){
+      aimZone.radius,
 
-    if(keys.left){
-
-      aimZone.x-=
-        aimZone.speed;
-
-    }
-
-
-    if(keys.right){
-
-      aimZone.x+=
-        aimZone.speed;
-
-    }
-
-
-    if(keys.up){
-
-      aimZone.y-=
-        aimZone.speed;
-
-    }
-
-
-    if(keys.down){
-
-      aimZone.y+=
-        aimZone.speed;
-
-    }
-
-
-    aimZone.x=
-      Math.max(
-
+      Math.min(
+        height-
         aimZone.radius,
+        aimZone.y
+      )
 
-        Math.min(
-          width-
-          aimZone.radius,
-          aimZone.x
-        )
-
-      );
+    );
 
 
-    aimZone.y=
-      Math.max(
+  const moveX=
+    aimZone.x-
+    oldX;
 
-        aimZone.radius,
+  const moveY=
+    aimZone.y-
+    oldY;
 
-        Math.min(
-          height-
-          aimZone.radius,
-          aimZone.y
-        )
 
-      );
+  crosshair.x+=
+    moveX;
 
-  }
+  crosshair.y+=
+    moveY;
+
+}
 
 
   function updateCrosshair(){
@@ -5518,10 +5591,14 @@ function resolveCut(){
     }
 
 
-    if(
+if(
   crackNetworkTouchesBoundary(
     newIndex
-  )
+  ) &&
+  getConnectedShotIndices(
+    newIndex
+  ).size ===
+  shots.length
 ){
 
   const network =
@@ -5798,11 +5875,16 @@ window.gbPaperRankColors=colors;
     }
 
 
-    phase=
-      "rank";
+phase=
+  "rank";
 
 
-    keys.up=
+targetElement.classList.remove(
+  "targetActive"
+);
+
+
+keys.up=
       false;
 
     keys.down=
@@ -5880,30 +5962,114 @@ rank +
   }
 
 
-  function timeout(){
+function timeout(){
 
-    const percent=
-      calculatePaperPercent();
-
-
-    const difference=
-      Math.abs(
-        percent-
-        targetPercent
-      );
+  const percent=
+    calculatePaperPercent();
 
 
-    finishGame(
+  if(
+    shots.length === 0
+  ){
 
-      percent,
+    phase=
+      "rank";
 
-      getRank(
-        difference
-      )
 
+    keys.up=
+      false;
+
+    keys.down=
+      false;
+
+    keys.left=
+      false;
+
+    keys.right=
+      false;
+
+
+    targetElement.classList.remove(
+      "targetActive"
     );
 
+
+    rankElement.textContent=
+      "？";
+
+
+    rankElement.style.color=
+      "#d8d8d8";
+
+
+    rankElement.className=
+      "gbPaperRank";
+
+
+    void rankElement.offsetWidth;
+
+
+    rankElement.classList.add(
+      "show"
+    );
+
+
+    setTimeout(
+      ()=>{
+
+        rankElement.className=
+          "gbPaperRank";
+
+
+        message.innerHTML=
+          "AFKですか？" +
+
+          "<small>" +
+
+          "一発も撃ってません<br><br>" +
+
+          "SPACE　もう一度" +
+
+          "</small>";
+
+
+        message.classList.remove(
+          "gbPaperHidden"
+        );
+
+
+        phase=
+          "result";
+
+      },
+
+      2500
+    );
+
+
+    return;
+
   }
+
+
+  const difference=
+    Math.abs(
+      percent-
+      targetPercent
+    );
+
+
+  finishGame(
+
+    percent,
+
+    getRank(
+      difference
+    )
+
+  );
+
+}
 
 
   function update(
@@ -6851,18 +7017,17 @@ if(
 })();
 </script>
 
-
-<!-- ================================== GAME BLOCK 05 END ================================== -->
-
+<!-- ==================================================================================== GAME BLOCK 05 END ==================================================================================== -->
 
 
 
 
 
-<!-- ==========================================================================
+
+<!-- ==============================================================================================================================================================================
      🎮 GAME BLOCK 06
      爆益を狙え！秒速トレーダー
-========================================================================== -->
+============================================================================================================================================================================== -->
 <style>
 .gb-stock-trader{
   position:relative;
@@ -9957,31 +10122,31 @@ function startGame(){
 
 })();
 </script>
-<!-- ================================== GAME BLOCK 06 END ================================== -->
+<!-- ==================================================================================== GAME BLOCK 06 END ============================================================================================================= -->
 
 
 
 
 
 
-<!-- ==========================================================================
+<!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 07
      タイトル
-========================================================================== -->
+======================================================================================================================================================================================================= -->
 
-<!-- ================================== GAME BLOCK 07 END ================================== -->
-
-
+<!-- ==================================================================================== GAME BLOCK 07 END ============================================================================================================= -->
 
 
 
 
-<!-- ==========================================================================
+
+
+<!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 08
      タイトル
-========================================================================== -->
+======================================================================================================================================================================================================= -->
 
-<!-- ================================== GAME BLOCK 08 END ================================== -->
+<!-- ==================================================================================== GAME BLOCK 08 END ==================================================================================== -->
 
 
 
