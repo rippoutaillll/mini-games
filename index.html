@@ -10131,8 +10131,4035 @@ function startGame(){
 
 <!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 07
-     タイトル
+     ダート・ジャンプ・バイク
 ======================================================================================================================================================================================================= -->
+
+<style>
+.djb-root{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:360px;
+  overflow:hidden;
+  background:#030712;
+  outline:none;
+  user-select:none;
+  -webkit-user-select:none;
+  font-family:Arial,"Yu Gothic",sans-serif
+}
+.djb-root canvas{
+  display:block;
+  width:100%;
+  height:100%
+}
+.djb-focus{
+  position:absolute;
+  right:10px;
+  bottom:8px;
+  color:rgba(255,255,255,.5);
+  font-size:11px;
+  pointer-events:none
+}
+.djb-root:focus .djb-focus{
+  display:none
+}
+</style>
+
+<script>
+(function(){
+'use strict';
+
+const GAME_ID = 'dirt-jump-bike-complete';
+
+function createGame(){
+
+  const W = 960;
+  const H = 540;
+  const GROUND_Y = 410;
+  const BIKE_GROUND_Y = GROUND_Y + 25;
+  const BIKE_X = 200;
+
+  const CFG = {
+    startSpeed:150,
+    gameOverSpeed:0,
+    dirtSpeedLoss:20,
+
+    jumpExcellentBonus:10,
+    jumpGoodBonus:5,
+
+    landingExcellentBonus:10,
+    landingGoodBonus:5,
+
+    landingExcellentRatio:0.09,
+    landingGoodRatio:0.25,
+    landingInputIgnoreRatio:0.15,
+
+landingJumpLockSeconds:0.12,
+
+    fixedJumpDistance:125,
+    jumpHeight:112,
+    ratingTextSeconds:0.8,
+
+    minimumDirtGapSeconds:1.2,
+    maximumDirtGapSeconds:2.1,
+
+    firstDirtMinSeconds:0.8,
+    firstDirtMaxSeconds:1.3,
+
+    goalDistance:6000,
+
+    dirtLengths:[
+      65,
+      82,
+      100
+    ],
+
+    rankS:27,
+    rankA:32,
+    rankB:37,
+    rankC:43,
+
+    screenPixelsPerDistance:7,
+
+    wheelRotationsPerSecond:1.5,
+
+    finishExitSpeed:720,
+
+    resultDelaySeconds:1.0
+  };
+
+  let root = null;
+  let canvas = null;
+  let ctx = null;
+
+  let animationFrame = 0;
+  let previousTime = 0;
+  let destroyed = false;
+
+  let canvasScale = 1;
+  let canvasOffsetX = 0;
+  let canvasOffsetY = 0;
+
+  let mode = 'title';
+
+  let speed = CFG.startSpeed;
+  let elapsedTime = 0;
+  let roadDistance = 0;
+
+  let bikeY = BIKE_GROUND_Y;
+
+  let jumping = false;
+  let jumpElapsed = 0;
+
+  let currentJumpSeconds =
+    CFG.fixedJumpDistance /
+    CFG.startSpeed;
+
+  let jumpGrade = 'normal';
+
+  let landingGrade = null;
+  let landingInputUsed = false;
+let landingJumpLockTime = 0;
+
+  let dirtAreas = [];
+  let nextDirtPosition = 0;
+  let dirtSerial = 0;
+  let currentDirtId = null;
+
+  let popupTexts = [];
+  let particles = [];
+
+  let screenShake = 0;
+  let bikeBounce = 0;
+
+  let wheelRotation = 0;
+
+  let meterNoise = 0;
+  let meterNoiseClock = 0;
+  let meterFlash = 0;
+
+  let accelerationEffectLevel = 0;
+  let accelerationEffectTime = 0;
+  let accelerationEffectDuration = 0;
+  let accelerationEffectAmount = 0;
+
+  let failureDelay = 0;
+  let crashClock = 0;
+  let exitOffsetX = 0;
+  let crashAngle = 0;
+
+  let finishTime = 0;
+  let resultDelay = 0;
+  let bikeExitedScreen = false;
+
+  let spaceReady = false;
+
+  function clamp(value,minimum,maximum){
+
+    return Math.max(
+      minimum,
+      Math.min(
+        maximum,
+        value
+      )
+    );
+  }
+
+  function randomRange(minimum,maximum){
+
+    return (
+      minimum +
+      Math.random() *
+      (
+        maximum -
+        minimum
+      )
+    );
+  }
+
+  function worldScale(){
+
+    return CFG.screenPixelsPerDistance;
+  }
+
+  function bikeWorldPosition(){
+
+    return (
+      roadDistance +
+      BIKE_X /
+      worldScale()
+    );
+  }
+
+  function frontContactWorldPosition(){
+
+    return (
+      bikeWorldPosition() +
+      66 /
+      worldScale()
+    );
+  }
+
+  function worldToScreen(worldPosition){
+
+    return (
+      BIKE_X +
+      (
+        worldPosition -
+        bikeWorldPosition()
+      ) *
+      worldScale()
+    );
+  }
+
+  function resetGame(){
+
+    mode = 'play';
+
+    speed = CFG.startSpeed;
+    elapsedTime = 0;
+    roadDistance = 0;
+
+    bikeY = BIKE_GROUND_Y;
+
+    jumping = false;
+    jumpElapsed = 0;
+
+    currentJumpSeconds =
+      CFG.fixedJumpDistance /
+      CFG.startSpeed;
+
+    jumpGrade = 'normal';
+
+    landingGrade = null;
+    landingInputUsed = false;
+landingJumpLockTime = 0;
+
+    dirtAreas = [];
+    dirtSerial = 0;
+    currentDirtId = null;
+
+    nextDirtPosition =
+      bikeWorldPosition() +
+      speed *
+      randomRange(
+        CFG.firstDirtMinSeconds,
+        CFG.firstDirtMaxSeconds
+      );
+
+    popupTexts = [];
+    particles = [];
+
+    screenShake = 0;
+    bikeBounce = 0;
+
+    wheelRotation = 0;
+
+    meterNoise = 0;
+    meterNoiseClock = 0;
+    meterFlash = 0;
+
+    accelerationEffectLevel = 0;
+    accelerationEffectTime = 0;
+    accelerationEffectDuration = 0;
+    accelerationEffectAmount = 0;
+
+    failureDelay = 0;
+    crashClock = 0;
+    exitOffsetX = 0;
+    crashAngle = 0;
+
+    finishTime = 0;
+    resultDelay = 0;
+    bikeExitedScreen = false;
+
+    spaceReady = false;
+  }
+
+  function createDirt(){
+
+    const dirtLength =
+      CFG.dirtLengths[
+        Math.floor(
+          Math.random() *
+          CFG.dirtLengths.length
+        )
+      ];
+
+    const dirtStart =
+      nextDirtPosition;
+
+    const dirtEnd =
+      dirtStart +
+      dirtLength;
+
+    dirtAreas.push({
+      id:++dirtSerial,
+      start:dirtStart,
+      end:dirtEnd,
+      hit:false
+    });
+
+    nextDirtPosition =
+      dirtEnd +
+      speed *
+      randomRange(
+        CFG.minimumDirtGapSeconds,
+        CFG.maximumDirtGapSeconds
+      );
+  }
+
+  function findNextDirt(){
+
+    const contactPosition =
+      frontContactWorldPosition();
+
+    for(const dirt of dirtAreas){
+
+      if(
+        dirt.end >=
+        contactPosition
+      ){
+        return dirt;
+      }
+    }
+
+    return null;
+  }
+
+  function showText(label,type){
+
+    popupTexts.push({
+      label:label,
+      type:type,
+      x:BIKE_X + 8,
+      y:bikeY - 135,
+      life:CFG.ratingTextSeconds,
+      maximumLife:CFG.ratingTextSeconds
+    });
+  }
+
+  function createParticles(
+    x,
+    y,
+    color,
+    count,
+    type
+  ){
+
+    for(
+      let i = 0;
+      i < count;
+      i++
+    ){
+
+      particles.push({
+        x:x,
+        y:y,
+        vx:randomRange(-155,95),
+        vy:randomRange(-185,-30),
+        life:randomRange(0.25,0.7),
+        size:randomRange(2,7),
+        color:color,
+        type:type
+      });
+    }
+  }
+
+  function startJump(){
+
+if(
+  mode !== 'play' ||
+  jumping ||
+  currentDirtId !== null ||
+  landingJumpLockTime > 0
+){
+  return;
+}
+
+    const dirt =
+      findNextDirt();
+
+    const frontContactPosition =
+      frontContactWorldPosition();
+
+    let gapPixels = Infinity;
+
+    if(dirt){
+
+      gapPixels =
+        (
+          dirt.start -
+          frontContactPosition
+        ) *
+        worldScale();
+    }
+
+    if(
+      gapPixels >= 0 &&
+      gapPixels <= 10
+    ){
+
+      jumpGrade = 'excellent';
+
+      showText(
+        'Excellent!',
+        'excellent'
+      );
+
+    }else if(
+      gapPixels > 10 &&
+      gapPixels <= 45
+    ){
+
+      jumpGrade = 'good';
+
+      showText(
+        'Good!',
+        'good'
+      );
+
+    }else{
+
+      jumpGrade = 'normal';
+    }
+
+    jumping = true;
+    jumpElapsed = 0;
+
+    currentJumpSeconds =
+      CFG.fixedJumpDistance /
+      Math.max(
+        1,
+        speed
+      );
+
+    landingGrade = null;
+    landingInputUsed = false;
+
+    createParticles(
+      BIKE_X - 45,
+      BIKE_GROUND_Y - 3,
+      '#cfb89a',
+      9,
+      'dust'
+    );
+  }
+
+  function registerLandingInput(){
+
+    if(
+      !jumping ||
+      jumpGrade === 'normal' ||
+      landingInputUsed
+    ){
+      return;
+    }
+
+    const progress =
+      clamp(
+        jumpElapsed /
+        currentJumpSeconds,
+        0,
+        1
+      );
+
+    if(
+      progress <=
+      CFG.landingInputIgnoreRatio
+    ){
+      return;
+    }
+
+    landingInputUsed = true;
+
+    const remaining =
+      1 -
+      progress;
+
+    if(
+      remaining <=
+      CFG.landingExcellentRatio
+    ){
+
+      landingGrade = 'excellent';
+
+    }else if(
+      remaining <=
+      CFG.landingGoodRatio
+    ){
+
+      landingGrade = 'good';
+
+    }else{
+
+      landingGrade = 'bad';
+    }
+  }
+
+  function changeSpeed(amount){
+
+    speed =
+      Math.max(
+        0,
+        speed + amount
+      );
+
+    meterFlash = 0.45;
+    meterNoiseClock = 0;
+
+    if(amount <= 0){
+      return;
+    }
+
+    accelerationEffectAmount =
+      amount;
+
+    if(amount <= 10){
+
+      accelerationEffectLevel = 1;
+      accelerationEffectDuration = 0.34;
+
+    }else{
+
+      accelerationEffectLevel = 2;
+      accelerationEffectDuration = 0.48;
+    }
+
+    accelerationEffectTime =
+      accelerationEffectDuration;
+  }
+
+  function landBike(
+    applyLandingResult
+  ){
+
+    jumping = false;
+    bikeY = BIKE_GROUND_Y;
+    bikeBounce = 1;
+
+landingJumpLockTime =
+  CFG.landingJumpLockSeconds;
+
+    if(applyLandingResult){
+
+      let speedChange = 0;
+
+      if(
+        jumpGrade === 'excellent'
+      ){
+
+        speedChange +=
+          CFG.jumpExcellentBonus;
+
+      }else if(
+        jumpGrade === 'good'
+      ){
+
+        speedChange +=
+          CFG.jumpGoodBonus;
+      }
+
+      if(jumpGrade !== 'normal'){
+
+        if(
+          landingGrade ===
+          'excellent'
+        ){
+
+          speedChange +=
+            CFG.landingExcellentBonus;
+
+          showText(
+            'Excellent!',
+            'excellent'
+          );
+
+          createParticles(
+            BIKE_X,
+            BIKE_GROUND_Y - 5,
+            '#ffd257',
+            17,
+            'spark'
+          );
+
+        }else if(
+          landingGrade === 'good'
+        ){
+
+          speedChange +=
+            CFG.landingGoodBonus;
+
+          showText(
+            'Good!',
+            'good'
+          );
+
+          createParticles(
+            BIKE_X,
+            BIKE_GROUND_Y - 5,
+            '#55eadc',
+            13,
+            'spark'
+          );
+
+        }else if(
+          landingGrade === 'bad'
+        ){
+
+          speedChange -=
+            CFG.dirtSpeedLoss;
+
+          showText(
+            'Bad!',
+            'bad'
+          );
+
+          createParticles(
+            BIKE_X,
+            BIKE_GROUND_Y - 5,
+            '#aeb7bf',
+            17,
+            'smoke'
+          );
+
+          screenShake = 7;
+        }
+      }
+
+      if(speedChange !== 0){
+
+        changeSpeed(
+          speedChange
+        );
+      }
+
+      if(
+        speed <=
+        CFG.gameOverSpeed
+      ){
+
+        startFailure();
+      }
+    }
+
+    jumpGrade = 'normal';
+    landingGrade = null;
+    landingInputUsed = false;
+  }
+
+  function hitDirt(dirt){
+
+    if(dirt.hit){
+      return;
+    }
+
+    dirt.hit = true;
+    currentDirtId = dirt.id;
+
+/*
+  速度50以下でダートを踏んだ場合は、
+  速度を一気に0にする。
+
+  51以上なら通常どおり20減速する。
+*/
+if(speed <= 70){
+
+  changeSpeed(
+    -speed
+  );
+
+}else{
+
+  changeSpeed(
+    -CFG.dirtSpeedLoss
+  );
+}
+
+    showText(
+      'Bad!',
+      'bad'
+    );
+
+    screenShake = 7;
+    bikeBounce = 1;
+
+    createParticles(
+      BIKE_X - 35,
+      BIKE_GROUND_Y - 2,
+      '#be6728',
+      25,
+      'mud'
+    );
+
+    if(
+      speed <=
+      CFG.gameOverSpeed
+    ){
+
+      startFailure();
+    }
+  }
+
+  function startFailure(){
+
+    if(mode !== 'play'){
+      return;
+    }
+
+    mode = 'failureDelay';
+    failureDelay = 0.4;
+  }
+
+  function updateWheelRotation(
+    deltaTime
+  ){
+
+    wheelRotation +=
+      Math.PI *
+      2 *
+      CFG.wheelRotationsPerSecond *
+      deltaTime;
+
+    wheelRotation %=
+      Math.PI * 2;
+  }
+
+  function updateJump(
+    deltaTime,
+    applyLandingResult
+  ){
+
+    if(!jumping){
+      return;
+    }
+
+    jumpElapsed +=
+      deltaTime;
+
+    const progress =
+      clamp(
+        jumpElapsed /
+        currentJumpSeconds,
+        0,
+        1
+      );
+
+bikeY =
+  BIKE_GROUND_Y -
+  Math.sin(
+    Math.PI *
+    progress
+  ) *
+  CFG.jumpHeight;
+
+    if(progress >= 1){
+
+      landBike(
+        applyLandingResult
+      );
+    }
+  }
+
+  function updateEffects(
+    deltaTime
+  ){
+
+    for(
+      let i =
+        particles.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const particle =
+        particles[i];
+
+      particle.life -=
+        deltaTime;
+
+      if(particle.life <= 0){
+
+        particles.splice(i,1);
+        continue;
+      }
+
+      particle.vy +=
+        (
+          particle.type === 'mud'
+            ? 430
+            : 270
+        ) *
+        deltaTime;
+
+      particle.x +=
+        particle.vx *
+        deltaTime;
+
+      particle.y +=
+        particle.vy *
+        deltaTime;
+    }
+
+    for(
+      let i =
+        popupTexts.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const text =
+        popupTexts[i];
+
+      text.life -=
+        deltaTime;
+
+      text.y -=
+        28 *
+        deltaTime;
+
+      if(text.life <= 0){
+
+        popupTexts.splice(i,1);
+      }
+    }
+
+    screenShake =
+      Math.max(
+        0,
+        screenShake -
+        deltaTime * 18
+      );
+
+    bikeBounce =
+      Math.max(
+        0,
+        bikeBounce -
+        deltaTime * 5
+      );
+
+    meterFlash =
+      Math.max(
+        0,
+        meterFlash -
+        deltaTime
+      );
+
+    accelerationEffectTime =
+      Math.max(
+        0,
+        accelerationEffectTime -
+        deltaTime
+      );
+
+    if(
+      accelerationEffectTime <= 0
+    ){
+
+      accelerationEffectLevel = 0;
+      accelerationEffectAmount = 0;
+    }
+
+/*
+  リザルト中は速度ノイズを0で固定する。
+
+  プレイ中、転倒演出中、ゴール退出中だけ
+  ノイズを更新する。
+*/
+if(
+  speed <= 0 ||
+  mode === 'result' ||
+  mode === 'gameOver'
+){
+
+  meterNoise = 0;
+  meterNoiseClock = 0;
+
+}else{
+
+  meterNoiseClock -=
+    deltaTime;
+
+  if(meterNoiseClock <= 0){
+
+    meterNoiseClock =
+      randomRange(
+        0.08,
+        0.22
+      );
+
+    meterNoise =
+      Math.random() < 0.52
+        ? 0
+        : Math.floor(
+            randomRange(
+              -2.99,
+              3
+            )
+          );
+  }
+}
+
+landingJumpLockTime =
+  Math.max(
+    0,
+    landingJumpLockTime -
+    deltaTime
+  );
+
+}
+
+  function updateDirtCollision(){
+
+    const contactPosition =
+      frontContactWorldPosition();
+
+    currentDirtId = null;
+
+    for(const dirt of dirtAreas){
+
+      if(
+        contactPosition >= dirt.start &&
+        contactPosition <= dirt.end
+      ){
+
+        currentDirtId =
+          dirt.id;
+
+        if(!jumping){
+
+          hitDirt(dirt);
+        }
+
+        break;
+      }
+    }
+
+    dirtAreas =
+      dirtAreas.filter(
+        dirt =>
+          dirt.end >
+          roadDistance - 100
+      );
+  }
+
+  function update(deltaTime){
+
+    updateEffects(
+      deltaTime
+    );
+
+    /*
+      プレイ中とゴール演出中は、
+      1フレームにつき必ず1回だけ更新する。
+
+      速度やジャンプ状態には連動しないため、
+      車輪の回転速度は常に一定。
+    */
+    if(
+      mode === 'play' ||
+      mode === 'finish'
+    ){
+
+      updateWheelRotation(
+        deltaTime
+      );
+    }
+
+    if(mode === 'play'){
+
+      elapsedTime +=
+        deltaTime;
+
+      roadDistance +=
+        speed *
+        deltaTime;
+
+      updateJump(
+        deltaTime,
+        true
+      );
+
+      updateDirtCollision();
+
+      const dirtSpawnAheadDistance =
+        W /
+        worldScale() +
+        35;
+
+      while(
+        nextDirtPosition <
+          CFG.goalDistance -
+          140 &&
+        nextDirtPosition <=
+          roadDistance +
+          dirtSpawnAheadDistance
+      ){
+
+        createDirt();
+      }
+
+      if(
+        roadDistance >=
+        CFG.goalDistance
+      ){
+
+        mode = 'finish';
+
+        finishTime =
+          elapsedTime;
+
+        exitOffsetX = 0;
+        resultDelay = 0;
+        bikeExitedScreen = false;
+
+        spaceReady = false;
+      }
+
+    }else if(
+      mode === 'failureDelay'
+    ){
+
+      failureDelay -=
+        deltaTime;
+
+      if(failureDelay <= 0){
+
+        mode = 'crash';
+
+        crashClock = 0;
+        exitOffsetX = 0;
+        crashAngle = 0;
+      }
+
+    }else if(mode === 'crash'){
+
+      crashClock +=
+        deltaTime;
+
+      exitOffsetX +=
+        170 *
+        deltaTime;
+
+      crashAngle =
+        Math.min(
+          1.25,
+          crashAngle +
+          2.8 *
+          deltaTime
+        );
+
+      if(crashClock >= 1.25){
+
+        mode = 'gameOver';
+        spaceReady = false;
+      }
+
+    }else if(mode === 'finish'){
+
+      if(jumping){
+
+        /*
+          空中でゴールしたあとも、
+          ゴール前と同じ前進速度で背景を流す。
+
+          これにより見えない壁へ
+          衝突したような急停止を防ぐ。
+        */
+        roadDistance +=
+          speed *
+          deltaTime;
+
+        /*
+          ゴール後もジャンプ軌道を続ける。
+          着地時の加速や減速判定は行わない。
+        */
+        updateJump(
+          deltaTime,
+          false
+        );
+
+      }else if(!bikeExitedScreen){
+
+        /*
+          着地後は速度720のまま退出する。
+        */
+        exitOffsetX +=
+          CFG.finishExitSpeed *
+          deltaTime;
+
+        const bikeLeftEdge =
+          BIKE_X +
+          exitOffsetX -
+          80;
+
+        if(bikeLeftEdge > W){
+
+          bikeExitedScreen = true;
+          resultDelay = 0;
+        }
+
+      }else{
+
+        /*
+          バイクが完全に画面外へ出てから
+          1秒待ってリザルトを表示する。
+
+          finishTimeはすでに確定しているため、
+          この時間はクリアタイムに含まれない。
+        */
+        resultDelay +=
+          deltaTime;
+
+        if(
+          resultDelay >=
+          CFG.resultDelaySeconds
+        ){
+
+          mode = 'result';
+          spaceReady = false;
+        }
+      }
+    }
+  }
+
+  function drawSky(){
+
+    const background =
+      ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        H
+      );
+
+    background.addColorStop(
+      0,
+      '#071225'
+    );
+
+    background.addColorStop(
+      0.62,
+      '#142a47'
+    );
+
+    background.addColorStop(
+      1,
+      '#2a3648'
+    );
+
+    ctx.fillStyle =
+      background;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.fillStyle =
+      '#dceaff';
+
+    for(
+      let i = 0;
+      i < 45;
+      i++
+    ){
+
+      ctx.globalAlpha =
+        0.25 +
+        (
+          i % 5
+        ) * 0.12;
+
+      ctx.fillRect(
+        (
+          i * 137 +
+          31
+        ) % W,
+
+        (
+          i * 73 +
+          19
+        ) % 235,
+
+        1.5,
+        1.5
+      );
+    }
+
+    ctx.globalAlpha = 1;
+
+    ctx.fillStyle =
+      '#0b1726';
+
+    ctx.beginPath();
+    ctx.moveTo(0,325);
+
+    for(
+      let x = 0;
+      x <= W;
+      x += 80
+    ){
+
+      ctx.lineTo(
+        x,
+        270 +
+        (
+          (
+            x / 80
+          ) % 3
+        ) * 22
+      );
+    }
+
+    ctx.lineTo(
+      W,
+      GROUND_Y
+    );
+
+    ctx.lineTo(
+      0,
+      GROUND_Y
+    );
+
+    ctx.fill();
+
+    const spacing = 190;
+
+    const movement =
+      (
+        roadDistance *
+        worldScale() *
+        0.45
+      ) %
+      spacing;
+
+    for(
+      let x = -spacing;
+      x <= W + spacing * 2;
+      x += spacing
+    ){
+
+      const streetlightX =
+        x -
+        movement +
+        spacing;
+
+      ctx.fillStyle =
+        '#202c39';
+
+      ctx.fillRect(
+        streetlightX,
+        235,
+        7,
+        172
+      );
+
+      ctx.fillStyle =
+        '#ffe4a1';
+
+      ctx.shadowColor =
+        '#ffd269';
+
+      ctx.shadowBlur = 18;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        streetlightX + 3,
+        245,
+        10,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  function dirtNoise(
+    dirtId,
+    index
+  ){
+
+    const value =
+      Math.sin(
+        dirtId * 91.731 +
+        index * 47.123
+      ) *
+      43758.5453;
+
+    return (
+      value -
+      Math.floor(value)
+    );
+  }
+
+  function drawDirt(dirt){
+
+    const x =
+      worldToScreen(
+        dirt.start
+      );
+
+    const width =
+      (
+        dirt.end -
+        dirt.start
+      ) *
+      worldScale();
+
+    if(
+      x > W ||
+      x + width < 0
+    ){
+      return;
+    }
+
+    const dirtTop =
+      GROUND_Y + 4;
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.rect(
+      x,
+      dirtTop,
+      width,
+      H - dirtTop
+    );
+
+    ctx.clip();
+
+    const mudGradient =
+      ctx.createLinearGradient(
+        0,
+        dirtTop,
+        0,
+        H
+      );
+
+    mudGradient.addColorStop(
+      0,
+      '#a95828'
+    );
+
+    mudGradient.addColorStop(
+      0.45,
+      '#88411f'
+    );
+
+    mudGradient.addColorStop(
+      1,
+      '#74371c'
+    );
+
+    ctx.fillStyle =
+      mudGradient;
+
+    ctx.fillRect(
+      x,
+      dirtTop,
+      width,
+      H - dirtTop
+    );
+
+    ctx.fillStyle =
+      '#c66b32';
+
+    const edgeCount =
+      Math.ceil(
+        width / 28
+      ) + 1;
+
+    for(
+      let i = 0;
+      i < edgeCount;
+      i++
+    ){
+
+      const blobX =
+        x +
+        i * 28 -
+        8;
+
+      const blobWidth =
+        18 +
+        dirtNoise(
+          dirt.id,
+          i
+        ) * 18;
+
+      const blobHeight =
+        4 +
+        dirtNoise(
+          dirt.id,
+          i + 50
+        ) * 7;
+
+      ctx.beginPath();
+
+      ctx.ellipse(
+        blobX,
+        dirtTop + 2,
+        blobWidth,
+        blobHeight,
+        0,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    }
+
+    const lightSpotCount =
+      Math.max(
+        5,
+        Math.floor(
+          width / 42
+        )
+      );
+
+    for(
+      let i = 0;
+      i < lightSpotCount;
+      i++
+    ){
+
+      const alpha =
+        0.22 +
+        dirtNoise(
+          dirt.id,
+          i + 500
+        ) * 0.25;
+
+      ctx.fillStyle =
+        'rgba(224,133,70,' +
+        alpha +
+        ')';
+
+      ctx.beginPath();
+
+      ctx.ellipse(
+        x +
+        dirtNoise(
+          dirt.id,
+          i + 100
+        ) *
+        width,
+
+        dirtTop +
+        14 +
+        dirtNoise(
+          dirt.id,
+          i + 200
+        ) *
+        (
+          H -
+          dirtTop -
+          25
+        ),
+
+        7 +
+        dirtNoise(
+          dirt.id,
+          i + 300
+        ) * 17,
+
+        3 +
+        dirtNoise(
+          dirt.id,
+          i + 400
+        ) * 7,
+
+        dirtNoise(
+          dirt.id,
+          i + 600
+        ) - 0.5,
+
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    }
+
+    const darkSpotCount =
+      Math.max(
+        4,
+        Math.floor(
+          width / 55
+        )
+      );
+
+    for(
+      let i = 0;
+      i < darkSpotCount;
+      i++
+    ){
+
+      const alpha =
+        0.20 +
+        dirtNoise(
+          dirt.id,
+          i + 1100
+        ) * 0.24;
+
+      ctx.fillStyle =
+        'rgba(72,29,14,' +
+        alpha +
+        ')';
+
+      ctx.beginPath();
+
+      ctx.ellipse(
+        x +
+        dirtNoise(
+          dirt.id,
+          i + 700
+        ) *
+        width,
+
+        dirtTop +
+        10 +
+        dirtNoise(
+          dirt.id,
+          i + 800
+        ) *
+        (
+          H -
+          dirtTop -
+          20
+        ),
+
+        8 +
+        dirtNoise(
+          dirt.id,
+          i + 900
+        ) * 21,
+
+        3 +
+        dirtNoise(
+          dirt.id,
+          i + 1000
+        ) * 8,
+
+        dirtNoise(
+          dirt.id,
+          i + 1200
+        ) - 0.5,
+
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+    }
+
+    ctx.restore();
+
+    ctx.strokeStyle =
+      'rgba(218,124,62,.5)';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      dirtTop
+    );
+
+    ctx.lineTo(
+      x + width,
+      dirtTop
+    );
+
+    ctx.stroke();
+  }
+
+  function drawRoad(){
+
+    ctx.fillStyle =
+      '#59616b';
+
+    ctx.fillRect(
+      0,
+      GROUND_Y,
+      W,
+      H - GROUND_Y
+    );
+
+    ctx.fillStyle =
+      '#a6adb4';
+
+    ctx.fillRect(
+      0,
+      GROUND_Y,
+      W,
+      5
+    );
+
+    ctx.strokeStyle =
+      '#e1ca60';
+
+    ctx.lineWidth = 6;
+
+    ctx.setLineDash([
+      52,
+      38
+    ]);
+
+    ctx.lineDashOffset =
+      (
+        roadDistance *
+        worldScale()
+      ) % 90;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      GROUND_Y + 105
+    );
+
+    ctx.lineTo(
+      W,
+      GROUND_Y + 105
+    );
+
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    for(const dirt of dirtAreas){
+
+      drawDirt(dirt);
+    }
+  }
+
+  function drawProgress(){
+
+    const progress =
+      clamp(
+        roadDistance /
+        CFG.goalDistance,
+        0,
+        1
+      );
+
+    ctx.fillStyle =
+      'rgba(2,6,12,.72)';
+
+    ctx.fillRect(
+      120,
+      20,
+      W - 240,
+      13
+    );
+
+    ctx.fillStyle =
+      '#61d8ff';
+
+    ctx.fillRect(
+      123,
+      23,
+      (
+        W - 246
+      ) *
+      progress,
+      7
+    );
+
+    ctx.strokeStyle =
+      'rgba(255,255,255,.55)';
+
+    ctx.strokeRect(
+      120.5,
+      20.5,
+      W - 240,
+      13
+    );
+  }
+
+  function drawSpeed(){
+
+/*
+  実速度が0のときは、必ず0を表示する。
+
+  速度が1以上のプレイ中だけ
+  メーターのノイズを加える。
+*/
+const displayedSpeed =
+  speed <= 0
+    ? 0
+    : Math.max(
+        0,
+        Math.round(speed) +
+        (
+          mode === 'result' ||
+          mode === 'gameOver'
+            ? 0
+            : meterNoise
+        )
+      );
+
+    ctx.save();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+
+/*
+  速度が0なら、メーターフラッシュが終了したあとも
+  赤い表示を維持する。
+*/
+const zeroSpeed =
+  speed <= 0;
+
+ctx.fillStyle =
+  zeroSpeed ||
+  meterFlash > 0
+    ? '#ff0000'
+    : '#f4f7fb';
+
+ctx.shadowColor =
+  zeroSpeed ||
+  meterFlash > 0
+    ? '#ff0000'
+    : '#58cfff';
+
+    ctx.shadowBlur = 12;
+
+    ctx.font =
+      '900 48px monospace';
+
+    ctx.fillText(
+      String(
+        displayedSpeed
+      ),
+      34,
+      42
+    );
+
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle =
+      '#cbd5df';
+
+    ctx.font =
+      'bold 17px sans-serif';
+
+    ctx.fillText(
+      'km/h',
+      36,
+      94
+    );
+
+    ctx.restore();
+  }
+
+  function drawWheel(
+    x,
+    y,
+    rotation
+  ){
+
+    ctx.save();
+
+    ctx.translate(
+      x,
+      y
+    );
+
+    /*
+      同一の回転をタイヤ、ブロック、
+      リム、スポークへまとめて適用する。
+    */
+    ctx.rotate(
+      rotation
+    );
+
+    ctx.fillStyle =
+      '#090d10';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      29,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#242c31';
+
+    ctx.lineWidth = 5;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      25.5,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.stroke();
+
+    const treadCount = 16;
+    const treadRadius = 26;
+
+    for(
+      let i = 0;
+      i < treadCount;
+      i++
+    ){
+
+      const treadAngle =
+        i *
+        Math.PI *
+        2 /
+        treadCount;
+
+      ctx.save();
+
+      ctx.rotate(
+        treadAngle
+      );
+
+      ctx.translate(
+        treadRadius,
+        0
+      );
+
+      ctx.rotate(
+        Math.PI / 2
+      );
+
+      ctx.fillStyle =
+        i % 2 === 0
+          ? '#343b40'
+          : '#2c3439';
+
+      ctx.fillRect(
+        -4.5,
+        -3.5,
+        9,
+        7
+      );
+
+      ctx.restore();
+    }
+
+    ctx.fillStyle =
+      '#1d272d';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      21,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#c6d0d5';
+
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      18,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#59676f';
+
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      14.5,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#829099';
+
+    ctx.lineWidth = 1.4;
+
+    const spokeCount = 10;
+
+    for(
+      let i = 0;
+      i < spokeCount;
+      i++
+    ){
+
+      const spokeAngle =
+        i *
+        Math.PI *
+        2 /
+        spokeCount;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        Math.cos(
+          spokeAngle
+        ) * 4,
+
+        Math.sin(
+          spokeAngle
+        ) * 4
+      );
+
+      ctx.lineTo(
+        Math.cos(
+          spokeAngle
+        ) * 17,
+
+        Math.sin(
+          spokeAngle
+        ) * 17
+      );
+
+      ctx.stroke();
+    }
+
+    ctx.fillStyle =
+      '#d7dfe3';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      5.5,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle =
+      '#68757c';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      2.4,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawBike(
+    x,
+    y,
+    rotation
+  ){
+
+    const bounceOffset =
+      bikeBounce > 0
+        ? Math.sin(
+            bikeBounce * 22
+          ) * 4
+        : 0;
+
+    const dirtWobble =
+      currentDirtId !== null &&
+      !jumping
+        ? Math.sin(
+            elapsedTime * 34
+          ) * 2.5
+        : 0;
+
+    ctx.save();
+
+    if(
+      jumping &&
+      jumpGrade !== 'normal'
+    ){
+
+      ctx.shadowColor =
+        jumpGrade === 'excellent'
+          ? '#ffd84d'
+          : '#57f1e3';
+
+      ctx.shadowBlur =
+        jumpGrade === 'excellent'
+          ? 24
+          : 17;
+    }
+
+ctx.translate(
+  x,
+  y + bounceOffset
+);
+
+/*
+  転倒時の回転だけをバイク全体へ適用する。
+
+  dirtWobbleは車輪へ適用しない。
+  これにより、着地直後に車輪の見かけの
+  回転速度が変化する問題を防ぐ。
+*/
+ctx.rotate(
+  rotation || 0
+);
+
+const rearWheelX = -62;
+const frontWheelX = 66;
+
+/*
+  前輪と後輪は、常にwheelRotationだけで回転する。
+*/
+drawWheel(
+  rearWheelX,
+  0,
+  wheelRotation
+);
+
+drawWheel(
+  frontWheelX,
+  0,
+  wheelRotation
+);
+
+/*
+  ダート走行時の揺れは、
+  車輪を描いたあとに車体とライダーだけへ適用する。
+*/
+ctx.save();
+
+ctx.rotate(
+  dirtWobble *
+  Math.PI /
+  180
+);
+
+    const bikeOrange =
+      '#ed6d27';
+
+    const bikeOrangeLight =
+      '#ff9a48';
+
+    const bikeOrangeDark =
+      '#9d3518';
+
+    ctx.strokeStyle =
+      '#30383d';
+
+    ctx.lineWidth = 8;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      rearWheelX + 3,
+      -2
+    );
+
+    ctx.lineTo(
+      -4,
+      -26
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      bikeOrange;
+
+    ctx.lineWidth = 8;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      29,
+      -54
+    );
+
+    ctx.lineTo(
+      frontWheelX - 5,
+      -5
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#d6dde1';
+
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      32,
+      -53
+    );
+
+    ctx.lineTo(
+      frontWheelX - 2,
+      -7
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      bikeOrange;
+
+    ctx.lineWidth = 10;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      rearWheelX + 12,
+      -10
+    );
+
+    ctx.lineTo(
+      -25,
+      -49
+    );
+
+    ctx.lineTo(
+      31,
+      -46
+    );
+
+    ctx.lineTo(
+      7,
+      -15
+    );
+
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#384249';
+
+    ctx.strokeStyle =
+      '#151b1f';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(-17,-39);
+    ctx.lineTo(20,-37);
+
+    ctx.quadraticCurveTo(
+      27,
+      -25,
+      19,
+      -9
+    );
+
+    ctx.lineTo(-10,-9);
+
+    ctx.quadraticCurveTo(
+      -23,
+      -22,
+      -17,
+      -39
+    );
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    const tankGradient =
+      ctx.createLinearGradient(
+        -30,
+        -67,
+        38,
+        -42
+      );
+
+    tankGradient.addColorStop(
+      0,
+      bikeOrangeLight
+    );
+
+    tankGradient.addColorStop(
+      0.5,
+      bikeOrange
+    );
+
+    tankGradient.addColorStop(
+      1,
+      bikeOrangeDark
+    );
+
+    ctx.fillStyle =
+      tankGradient;
+
+    ctx.strokeStyle =
+      '#672810';
+
+    ctx.lineWidth = 2.5;
+
+    ctx.beginPath();
+
+    ctx.moveTo(-27,-59);
+
+    ctx.quadraticCurveTo(
+      2,
+      -70,
+      38,
+      -55
+    );
+
+    ctx.lineTo(27,-42);
+
+    ctx.quadraticCurveTo(
+      -3,
+      -40,
+      -29,
+      -48
+    );
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#171c20';
+
+    ctx.strokeStyle =
+      '#5c666c';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(-59,-59);
+
+    ctx.quadraticCurveTo(
+      -35,
+      -67,
+      -9,
+      -60
+    );
+
+    ctx.lineTo(-13,-49);
+    ctx.lineTo(-57,-49);
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle =
+      bikeOrange;
+
+    ctx.strokeStyle =
+      bikeOrangeDark;
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(-31,-48);
+    ctx.lineTo(25,-43);
+    ctx.lineTo(8,-17);
+    ctx.lineTo(-16,-19);
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      bikeOrange;
+
+    ctx.lineWidth = 7;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      rearWheelX,
+      0,
+      33,
+      Math.PI * 1.08,
+      Math.PI * 1.68
+    );
+
+    ctx.stroke();
+
+    ctx.beginPath();
+
+    ctx.arc(
+      frontWheelX,
+      0,
+      33,
+      Math.PI * 1.18,
+      Math.PI * 1.87
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#283137';
+
+    ctx.lineWidth = 5;
+
+    ctx.beginPath();
+
+    ctx.moveTo(29,-54);
+    ctx.lineTo(36,-68);
+    ctx.lineTo(53,-70);
+
+    ctx.stroke();
+
+    const hip = {
+      x:-29,
+      y:-66
+    };
+
+    const shoulder = {
+      x:-13,
+      y:-91
+    };
+
+    const frontKnee = {
+      x:14,
+      y:-48
+    };
+
+    const frontAnkle = {
+      x:34,
+      y:-17
+    };
+
+    const jacket =
+      ctx.createLinearGradient(
+        -45,
+        -106,
+        18,
+        -61
+      );
+
+    jacket.addColorStop(
+      0,
+      '#a8edff'
+    );
+
+    jacket.addColorStop(
+      0.48,
+      '#36b8e7'
+    );
+
+    jacket.addColorStop(
+      1,
+      '#176888'
+    );
+
+    ctx.fillStyle =
+      jacket;
+
+    ctx.strokeStyle =
+      '#10394d';
+
+    ctx.lineWidth = 2.5;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      shoulder.x - 15,
+      shoulder.y - 6
+    );
+
+    ctx.quadraticCurveTo(
+      shoulder.x + 4,
+      shoulder.y - 12,
+      shoulder.x + 19,
+      shoulder.y + 1
+    );
+
+    ctx.lineTo(
+      hip.x + 14,
+      hip.y + 8
+    );
+
+    ctx.lineTo(
+      hip.x - 13,
+      hip.y + 7
+    );
+
+    ctx.lineTo(
+      shoulder.x - 18,
+      shoulder.y + 10
+    );
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#3c5360';
+
+    ctx.lineWidth = 16;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      hip.x,
+      hip.y
+    );
+
+    ctx.lineTo(
+      frontKnee.x,
+      frontKnee.y
+    );
+
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#496572';
+
+    ctx.lineWidth = 14;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      frontKnee.x,
+      frontKnee.y
+    );
+
+    ctx.lineTo(
+      frontAnkle.x,
+      frontAnkle.y
+    );
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#24333b';
+
+    ctx.strokeStyle =
+      '#8db2c1';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      frontKnee.x,
+      frontKnee.y,
+      9,
+      7,
+      0.55,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.strokeStyle =
+      '#151e24';
+
+    ctx.lineWidth = 12;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      frontAnkle.x - 2,
+      frontAnkle.y
+    );
+
+    ctx.lineTo(
+      frontAnkle.x + 22,
+      frontAnkle.y
+    );
+
+    ctx.stroke();
+
+/*
+  手前側の腕だけを描く。
+
+  肩から肘、肘から手を別々に描いて、
+  肘が曲がって見えるようにする。
+*/
+const frontElbow = {
+  x: 10,
+  y: -76
+};
+
+const frontHand = {
+  x: 50,
+  y: -69
+};
+
+/*
+  肩から肘までの上腕。
+*/
+ctx.strokeStyle =
+  '#67d4f3';
+
+ctx.lineWidth = 13;
+ctx.lineCap = 'round';
+ctx.lineJoin = 'round';
+
+ctx.beginPath();
+
+ctx.moveTo(
+  shoulder.x + 6,
+  shoulder.y
+);
+
+ctx.lineTo(
+  frontElbow.x,
+  frontElbow.y
+);
+
+ctx.stroke();
+
+/*
+  肘からハンドルまでの前腕。
+*/
+ctx.strokeStyle =
+  '#45acd0';
+
+ctx.lineWidth = 11;
+
+ctx.beginPath();
+
+ctx.moveTo(
+  frontElbow.x,
+  frontElbow.y
+);
+
+ctx.lineTo(
+  frontHand.x,
+  frontHand.y
+);
+
+ctx.stroke();
+
+/*
+  肘を分かりやすくする肘当て。
+*/
+ctx.fillStyle =
+  '#226b88';
+
+ctx.strokeStyle =
+  '#b4efff';
+
+ctx.lineWidth = 2;
+
+ctx.beginPath();
+
+ctx.ellipse(
+  frontElbow.x,
+  frontElbow.y,
+  7,
+  6,
+  0.2,
+  0,
+  Math.PI * 2
+);
+
+ctx.fill();
+ctx.stroke();
+
+/*
+  ハンドルを握る手。
+*/
+ctx.fillStyle =
+  '#121a20';
+
+ctx.beginPath();
+
+ctx.arc(
+  frontHand.x,
+  frontHand.y,
+  6.5,
+  0,
+  Math.PI * 2
+);
+
+ctx.fill();
+
+    ctx.save();
+
+    ctx.translate(
+      -8,
+      -112
+    );
+
+    ctx.rotate(0.22);
+
+    const helmet =
+      ctx.createLinearGradient(
+        -22,
+        -22,
+        22,
+        22
+      );
+
+    helmet.addColorStop(
+      0,
+      '#c9f5ff'
+    );
+
+    helmet.addColorStop(
+      0.46,
+      '#55cdf3'
+    );
+
+    helmet.addColorStop(
+      1,
+      '#17698d'
+    );
+
+    ctx.fillStyle =
+      helmet;
+
+    ctx.strokeStyle =
+      '#0d3447';
+
+    ctx.lineWidth = 2.5;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      21,
+      0,
+      Math.PI * 2
+    );
+
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#0a1116';
+
+    ctx.beginPath();
+
+    ctx.moveTo(-1,-10);
+
+    ctx.quadraticCurveTo(
+      25,
+      -7,
+      25,
+      7
+    );
+
+    ctx.lineTo(2,8);
+
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.strokeStyle =
+      bikeOrange;
+
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      -3,
+      0,
+      17,
+      1.75,
+      4.25
+    );
+
+    ctx.stroke();
+
+    ctx.restore();
+    ctx.restore();
+    ctx.restore();
+  }
+
+  function drawAccelerationEffect(){
+
+    if(
+      accelerationEffectLevel === 0 ||
+      accelerationEffectTime <= 0 ||
+      accelerationEffectDuration <= 0
+    ){
+      return;
+    }
+
+    const remainingRatio =
+      clamp(
+        accelerationEffectTime /
+        accelerationEffectDuration,
+        0,
+        1
+      );
+
+    const strongEffect =
+      accelerationEffectLevel === 2;
+
+    const excellentAcceleration =
+      accelerationEffectAmount === 20;
+
+    const lineCount =
+      strongEffect
+        ? 30
+        : 14;
+
+    const lineAlpha =
+      (
+        strongEffect
+          ? 0.48
+          : 0.28
+      ) *
+      remainingRatio;
+
+    const screenAlpha =
+      (
+        strongEffect
+          ? 0.11
+          : 0.055
+      ) *
+      remainingRatio;
+
+    ctx.save();
+
+    ctx.fillStyle =
+      excellentAcceleration
+        ? (
+            'rgba(255,210,55,' +
+            screenAlpha +
+            ')'
+          )
+        : (
+            'rgba(105,225,255,' +
+            screenAlpha +
+            ')'
+          );
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.lineCap = 'round';
+
+    for(
+      let i = 0;
+      i < lineCount;
+      i++
+    ){
+
+      const seed =
+        i * 83 +
+        accelerationEffectLevel *
+        131;
+
+      const lineY =
+        20 +
+        (
+          seed * 47
+        ) %
+        (
+          H - 40
+        );
+
+      const lineMovement =
+        elapsedTime *
+        (
+          strongEffect
+            ? 1650
+            : 1100
+        );
+
+      const lineAreaWidth =
+        W + 500;
+
+      const rawLineX =
+        seed * 97 -
+        lineMovement;
+
+      const wrappedLineX =
+        (
+          (
+            rawLineX %
+            lineAreaWidth
+          ) +
+          lineAreaWidth
+        ) %
+        lineAreaWidth;
+
+      const startX =
+        wrappedLineX -
+        250;
+
+      const lineLength =
+        (
+          strongEffect
+            ? 220
+            : 155
+        ) +
+        seed %
+        (
+          strongEffect
+            ? 150
+            : 65
+        );
+
+      ctx.strokeStyle =
+        excellentAcceleration
+          ? (
+              'rgba(255,245,190,' +
+              lineAlpha +
+              ')'
+            )
+          : (
+              'rgba(180,245,255,' +
+              lineAlpha +
+              ')'
+            );
+
+      ctx.lineWidth =
+        strongEffect
+          ? 3.2
+          : 2.2;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        startX,
+        lineY
+      );
+
+      ctx.lineTo(
+        startX -
+        lineLength,
+        lineY
+      );
+
+      ctx.stroke();
+    }
+
+    if(strongEffect){
+
+      const thinLineCount = 22;
+
+      for(
+        let i = 0;
+        i < thinLineCount;
+        i++
+      ){
+
+        const seed =
+          i * 109 +
+          317;
+
+        const lineY =
+          12 +
+          (
+            seed * 61
+          ) %
+          (
+            H - 24
+          );
+
+        const lineMovement =
+          elapsedTime *
+          2200;
+
+        const lineAreaWidth =
+          W + 600;
+
+        const rawLineX =
+          seed * 73 -
+          lineMovement;
+
+        const wrappedLineX =
+          (
+            (
+              rawLineX %
+              lineAreaWidth
+            ) +
+            lineAreaWidth
+          ) %
+          lineAreaWidth;
+
+        const startX =
+          wrappedLineX -
+          300;
+
+        const lineLength =
+          80 +
+          seed % 180;
+
+        ctx.strokeStyle =
+          excellentAcceleration
+            ? (
+                'rgba(255,252,220,' +
+                (
+                  0.40 *
+                  remainingRatio
+                ) +
+                ')'
+              )
+            : (
+                'rgba(225,252,255,' +
+                (
+                  0.34 *
+                  remainingRatio
+                ) +
+                ')'
+              );
+
+        ctx.lineWidth = 1.2;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          startX,
+          lineY
+        );
+
+        ctx.lineTo(
+          startX -
+          lineLength,
+          lineY
+        );
+
+        ctx.stroke();
+      }
+    }
+
+    const edgeGradient =
+      ctx.createRadialGradient(
+        W / 2,
+        H / 2,
+        H * 0.12,
+        W / 2,
+        H / 2,
+        W * 0.67
+      );
+
+    const edgeColor =
+      excellentAcceleration
+        ? '255,210,55'
+        : '70,210,255';
+
+    edgeGradient.addColorStop(
+      0,
+      'rgba(' +
+      edgeColor +
+      ',0)'
+    );
+
+    edgeGradient.addColorStop(
+      0.72,
+      'rgba(' +
+      edgeColor +
+      ',0)'
+    );
+
+    edgeGradient.addColorStop(
+      1,
+      'rgba(' +
+      edgeColor +
+      ',' +
+      (
+        excellentAcceleration
+          ? 0.24 *
+            remainingRatio
+          : (
+              strongEffect
+                ? 0.22
+                : 0.08
+            ) *
+            remainingRatio
+      ) +
+      ')'
+    );
+
+    ctx.fillStyle =
+      edgeGradient;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.restore();
+  }
+
+  function drawParticles(){
+
+    for(
+      const particle of particles
+    ){
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        clamp(
+          particle.life * 2.5,
+          0,
+          1
+        );
+
+      ctx.fillStyle =
+        particle.color;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        particle.x,
+        particle.y,
+        particle.size,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  function drawPopupTexts(){
+
+    for(
+      const text of popupTexts
+    ){
+
+      const alpha =
+        clamp(
+          text.life / 0.22,
+          0,
+          1
+        );
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        alpha;
+
+      ctx.translate(
+        text.x,
+        text.y
+      );
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.lineJoin = 'round';
+
+      ctx.font =
+        '900 34px sans-serif';
+
+      ctx.lineWidth = 8;
+
+      ctx.strokeStyle =
+        text.type === 'bad'
+          ? '#4a0010'
+          : '#1a2230';
+
+      ctx.strokeText(
+        text.label,
+        0,
+        0
+      );
+
+      ctx.lineWidth = 3;
+
+      if(
+        text.type ===
+        'excellent'
+      ){
+
+        ctx.strokeStyle =
+          '#fff0a3';
+
+        ctx.fillStyle =
+          '#ffc928';
+
+        ctx.shadowColor =
+          '#ffd731';
+
+        ctx.shadowBlur = 18;
+
+      }else if(
+        text.type === 'good'
+      ){
+
+        ctx.strokeStyle =
+          '#d9ffff';
+
+        ctx.fillStyle =
+          '#27e2d2';
+
+        ctx.shadowColor =
+          '#35f8e6';
+
+        ctx.shadowBlur = 14;
+
+      }else{
+
+        ctx.strokeStyle =
+          '#ffb4ba';
+
+        ctx.fillStyle =
+          '#ff354c';
+
+        ctx.shadowColor =
+          '#ff1e3b';
+
+        ctx.shadowBlur = 15;
+      }
+
+      ctx.strokeText(
+        text.label,
+        0,
+        0
+      );
+
+      ctx.fillText(
+        text.label,
+        0,
+        0
+      );
+
+      ctx.restore();
+    }
+  }
+
+  function drawGoal(){
+
+    const x =
+      worldToScreen(
+        CFG.goalDistance
+      );
+
+    if(
+      x < -60 ||
+      x > W + 60
+    ){
+      return;
+    }
+
+    const size = 18;
+    const columns = 3;
+
+    const rows =
+      Math.ceil(
+        (
+          H -
+          GROUND_Y
+        ) /
+        size
+      );
+
+    for(
+      let row = 0;
+      row < rows;
+      row++
+    ){
+
+      for(
+        let column = 0;
+        column < columns;
+        column++
+      ){
+
+        ctx.fillStyle =
+          (
+            row +
+            column
+          ) % 2
+            ? '#151515'
+            : '#f5f5f5';
+
+        ctx.fillRect(
+          x +
+          column *
+          size,
+
+          GROUND_Y +
+          row *
+          size,
+
+          size,
+          size
+        );
+      }
+    }
+  }
+
+  function getRank(){
+
+    if(finishTime < CFG.rankS){
+      return 'S';
+    }
+
+    if(finishTime < CFG.rankA){
+      return 'A';
+    }
+
+    if(finishTime < CFG.rankB){
+      return 'B';
+    }
+
+    if(finishTime < CFG.rankC){
+      return 'C';
+    }
+
+    return 'D';
+  }
+
+  function drawTitle(){
+
+    drawSky();
+    drawRoad();
+
+    ctx.fillStyle =
+      'rgba(1,5,12,.9)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.shadowColor =
+      '#ff7a28';
+
+    ctx.shadowBlur = 18;
+
+    ctx.font =
+      '900 55px sans-serif';
+
+    ctx.fillText(
+      'ダート・ジャンプ・バイク',
+      W / 2,
+      82
+    );
+
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle =
+      'rgba(2,6,13,.96)';
+
+    ctx.fillRect(
+      105,
+      152,
+      W - 210,
+      260
+    );
+
+    ctx.strokeStyle =
+      'rgba(255,160,65,.62)';
+
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+      105,
+      152,
+      W - 210,
+      260
+    );
+
+    const instructions = [
+      'ジャンプ　　SPACE',
+      'スタイリッシュジャンプ　　ダートギリギリでSPACE',
+      'スタイリッシュランディング　　着地ギリギリでSPACE',
+      '速度が0になると転倒'
+    ];
+
+    ctx.font =
+      'bold 20px sans-serif';
+
+    ctx.fillStyle =
+      '#eef5fb';
+
+    let instructionY = 190;
+
+    for(
+      const instruction of
+      instructions
+    ){
+
+      ctx.fillText(
+        instruction,
+        W / 2,
+        instructionY
+      );
+
+      instructionY += 58;
+    }
+
+    ctx.fillStyle =
+      '#ffb44e';
+
+    ctx.font =
+      '900 29px sans-serif';
+
+    ctx.fillText(
+      'SPACEで開始',
+      W / 2,
+      470
+    );
+  }
+
+  function drawResult(){
+
+    ctx.fillStyle =
+      'rgba(1,5,11,.82)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+
+    ctx.font =
+      'bold 27px sans-serif';
+
+    ctx.fillText(
+      'TIME',
+      W / 2,
+      160
+    );
+
+    ctx.font =
+      '900 72px monospace';
+
+    ctx.fillText(
+      finishTime.toFixed(2),
+      W / 2,
+      238
+    );
+
+    ctx.fillStyle =
+      '#ffbd38';
+
+    ctx.font =
+      '900 34px sans-serif';
+
+    ctx.fillText(
+      'RANK',
+      W / 2,
+      318
+    );
+
+    ctx.font =
+      '900 105px sans-serif';
+
+    ctx.fillText(
+      getRank(),
+      W / 2,
+      418
+    );
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      'bold 23px sans-serif';
+
+    ctx.fillText(
+      'SPACEでもう一度',
+      W / 2,
+      495
+    );
+  }
+
+  function drawGameOver(){
+
+    ctx.fillStyle =
+      'rgba(0,0,0,.62)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle =
+      '#ff0000';
+
+    ctx.font =
+      '900 62px sans-serif';
+
+    ctx.fillText(
+      'GAME OVER',
+      W / 2,
+      245
+    );
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      'bold 24px sans-serif';
+
+    ctx.fillText(
+      'SPACEでもう一度',
+      W / 2,
+      335
+    );
+  }
+
+function render(){
+
+  ctx.setTransform(
+    canvasScale,
+    0,
+    0,
+    canvasScale,
+    canvasOffsetX,
+    canvasOffsetY
+  );
+
+  ctx.clearRect(
+    -canvasOffsetX /
+    canvasScale,
+
+    -canvasOffsetY /
+    canvasScale,
+
+    canvas.width /
+    canvasScale,
+
+    canvas.height /
+    canvasScale
+  );
+
+  /*
+    タイトル画面。
+
+    タイトル画面では進捗バーと速度表示を
+    描画しないため、ここで個別に処理する。
+  */
+  if(mode === 'title'){
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.rect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.clip();
+
+    drawTitle();
+
+    ctx.restore();
+
+    return;
+  }
+
+  /*
+    背景、道路、ゴール、バイク、
+    パーティクルなどを描画する。
+
+    この範囲だけ画面揺れを適用する。
+  */
+  ctx.save();
+
+  ctx.beginPath();
+
+  ctx.rect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  ctx.clip();
+
+  if(screenShake > 0){
+
+    ctx.translate(
+      randomRange(
+        -screenShake,
+        screenShake
+      ),
+
+      randomRange(
+        -screenShake,
+        screenShake
+      )
+    );
+  }
+
+  drawSky();
+  drawRoad();
+  drawGoal();
+
+  let drawX =
+    BIKE_X;
+
+  let drawY =
+    bikeY;
+
+  let drawRotation = 0;
+
+  /*
+    転倒演出中とゲームオーバー後は、
+    同じ転倒位置と角度を維持する。
+  */
+  if(
+    mode === 'crash' ||
+    mode === 'gameOver'
+  ){
+
+    drawX +=
+      exitOffsetX;
+
+    drawY +=
+      Math.min(
+        55,
+        crashClock * 45
+      );
+
+    drawRotation =
+      crashAngle;
+
+  }else if(mode === 'finish'){
+
+    drawX +=
+      exitOffsetX;
+  }
+
+  if(
+    mode !== 'result' &&
+    !bikeExitedScreen
+  ){
+
+    drawBike(
+      drawX,
+      drawY,
+      drawRotation
+    );
+  }
+
+  drawAccelerationEffect();
+  drawParticles();
+  drawPopupTexts();
+
+  /*
+    ここで画面揺れを終了する。
+  */
+  ctx.restore();
+
+  /*
+    進捗バーと速度表示を、
+    画面揺れの影響を受けない状態で描く。
+
+    これによりダート接触時に枠が
+    太くなったり明るくなったりしない。
+  */
+  ctx.save();
+
+  ctx.beginPath();
+
+  ctx.rect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  ctx.clip();
+
+  drawProgress();
+  drawSpeed();
+
+  /*
+    リザルト画面も揺れの影響を受けない。
+  */
+  if(mode === 'result'){
+
+    drawResult();
+  }
+
+  /*
+    ゲームオーバー画面も揺れの影響を受けない。
+
+    倒れたバイクは、先ほどの描画範囲で
+    転倒した姿勢のまま描かれている。
+  */
+  if(mode === 'gameOver'){
+
+    drawGameOver();
+  }
+
+  ctx.restore();
+}
+
+  function keyDown(event){
+
+    if(event.code !== 'Space'){
+      return;
+    }
+
+    event.preventDefault();
+
+    if(event.repeat){
+      return;
+    }
+
+    if(mode === 'title'){
+
+      resetGame();
+      return;
+    }
+
+    if(
+      mode === 'result' ||
+      mode === 'gameOver'
+    ){
+
+      if(spaceReady){
+
+        resetGame();
+      }
+
+      return;
+    }
+
+    if(
+      mode !== 'play' ||
+      !spaceReady
+    ){
+      return;
+    }
+
+    if(jumping){
+
+      registerLandingInput();
+
+    }else{
+
+      startJump();
+    }
+  }
+
+  function keyUp(event){
+
+    if(event.code !== 'Space'){
+      return;
+    }
+
+    event.preventDefault();
+
+    spaceReady = true;
+  }
+
+  function resize(){
+
+    if(
+      !root ||
+      !canvas
+    ){
+      return;
+    }
+
+    const rect =
+      root.getBoundingClientRect();
+
+    const pixelRatio =
+      Math.min(
+        window.devicePixelRatio || 1,
+        2
+      );
+
+    canvas.width =
+      Math.max(
+        1,
+        Math.round(
+          rect.width *
+          pixelRatio
+        )
+      );
+
+    canvas.height =
+      Math.max(
+        1,
+        Math.round(
+          rect.height *
+          pixelRatio
+        )
+      );
+
+    canvasScale =
+      Math.min(
+        canvas.width / W,
+        canvas.height / H
+      );
+
+    canvasOffsetX =
+      (
+        canvas.width -
+        W * canvasScale
+      ) / 2;
+
+    canvasOffsetY =
+      (
+        canvas.height -
+        H * canvasScale
+      ) / 2;
+  }
+
+  function gameLoop(timestamp){
+
+    if(destroyed){
+      return;
+    }
+
+    const deltaTime =
+      previousTime
+        ? Math.min(
+            0.033,
+            (
+              timestamp -
+              previousTime
+            ) / 1000
+          )
+        : 0;
+
+    previousTime =
+      timestamp;
+
+    update(
+      deltaTime
+    );
+
+    render();
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+  }
+
+  function focusGame(){
+
+    if(root){
+
+      root.focus();
+    }
+  }
+
+  function mount(target){
+
+    destroyed = false;
+    previousTime = 0;
+
+    root =
+      document.createElement(
+        'div'
+      );
+
+    root.className =
+      'djb-root';
+
+    root.tabIndex = 0;
+
+    root.setAttribute(
+      'aria-label',
+      'ダート・ジャンプ・バイク'
+    );
+
+    canvas =
+      document.createElement(
+        'canvas'
+      );
+
+    const hint =
+      document.createElement(
+        'div'
+      );
+
+    hint.className =
+      'djb-focus';
+
+    hint.textContent =
+      '画面をクリックして操作';
+
+    root.appendChild(
+      canvas
+    );
+
+    root.appendChild(
+      hint
+    );
+
+    target.appendChild(
+      root
+    );
+
+    ctx =
+      canvas.getContext(
+        '2d'
+      );
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      focusGame
+    );
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+
+    setTimeout(
+      focusGame,
+      0
+    );
+  }
+
+  function destroy(){
+
+    if(destroyed){
+      return;
+    }
+
+    destroyed = true;
+
+    cancelAnimationFrame(
+      animationFrame
+    );
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+
+      root.removeEventListener(
+        'pointerdown',
+        focusGame
+      );
+
+      root.remove();
+    }
+
+    root = null;
+    canvas = null;
+    ctx = null;
+
+    dirtAreas = [];
+    particles = [];
+    popupTexts = [];
+  }
+
+  return {
+    mount:mount,
+    destroy:destroy
+  };
+}
+
+const game = {
+  id:GAME_ID,
+  name:'ダート・ジャンプ・バイク',
+  instance:null,
+
+  mount:function(target){
+
+    this.destroy();
+
+    this.instance =
+      createGame();
+
+    this.instance.mount(
+      target
+    );
+  },
+
+  destroy:function(){
+
+    if(this.instance){
+
+      this.instance.destroy();
+      this.instance = null;
+    }
+  }
+};
+
+if(
+  window.MiniGames &&
+  typeof window.MiniGames.register ===
+    'function'
+){
+
+  window.MiniGames.register(
+    game
+  );
+
+}else{
+
+  document.documentElement.style.width =
+    '100%';
+
+  document.documentElement.style.height =
+    '100%';
+
+  document.body.style.cssText =
+    'margin:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'overflow:hidden;' +
+    'background:#000;';
+
+  const host =
+    document.createElement(
+      'div'
+    );
+
+  host.style.cssText =
+    'position:fixed;' +
+    'inset:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'background:#000;';
+
+  document.body.appendChild(
+    host
+  );
+
+  game.mount(
+    host
+  );
+}
+
+})();
+</script>
 
 <!-- ==================================================================================== GAME BLOCK 07 END ============================================================================================================= -->
 
@@ -10142,11 +14169,7409 @@ function startGame(){
 
 
 <!-- =======================================================================================================================================================================================================
-     🎮 GAME BLOCK 08
+     🎮 GAME BLOCK 09
+     タイトル
+======================================================================================================================================================================================================= -->
+<style>
+.tsg-root{position:relative;width:100%;height:100%;min-height:360px;overflow:hidden;background:#120f0d;outline:none;user-select:none;-webkit-user-select:none;font-family:Arial,"Yu Gothic",sans-serif}
+.tsg-root canvas{display:block;width:100%;height:100%}
+.tsg-focus{position:absolute;right:10px;bottom:8px;color:rgba(255,255,255,.5);font-size:11px;pointer-events:none}
+.tsg-root:focus .tsg-focus{display:none}
+</style>
+
+<script>
+(function(){
+'use strict';
+
+const GAME_ID='timing-sheathe-complete';
+
+function createGame(){
+
+  const W=960;
+  const H=540;
+  const TAU=Math.PI*2;
+
+  const CFG={
+    swordStartX:348,
+    swordStartY:270,
+    sheathMouthX:655,
+    sheathMouthY:270,
+
+    swingDegrees:30,
+
+    bladeLength:250,
+    bladeWidth:20,
+    handleLength:104,
+    sheathLength:285,
+
+    snapDuration:0.045,
+    insertionDuration:0.095,
+
+/*
+  回転速度は最初から最後まで
+  滑らかに上昇させる。
+*/
+baseSwingCycles:0.28,
+swingCycleLinearGrowth:0.025,
+swingCycleCurveGrowth:0.0045,
+maximumCycles:2.15,
+
+    initialAngleTolerance:12.5,
+    angleToleranceLoss:0.42,
+    minimumAngleTolerance:4.0,
+
+    mouthHalfHeight:28,
+
+    fadeOutSeconds:0.12,
+    blackHoldSeconds:0.10,
+    fadeInSeconds:0.13,
+
+    failureDelaySeconds:0.58,
+
+    rankS:14,
+    rankA:11,
+    rankB:8,
+    rankC:5
+  };
+
+  let root=null;
+  let canvas=null;
+  let ctx=null;
+
+  let animationFrame=0;
+  let previousTime=0;
+  let destroyed=false;
+
+  let canvasScale=1;
+  let canvasOffsetX=0;
+  let canvasOffsetY=0;
+
+  let mode='title';
+  let score=0;
+
+  let swordX=CFG.swordStartX;
+  let swordY=CFG.swordStartY;
+  let swordAngle=0;
+  let inputAngle=0;
+
+  let swingClock=-Math.PI/2;
+  let actionTime=0;
+  let transitionTime=0;
+  let failureTime=0;
+
+  let spaceReady=false;
+
+  let screenFlash=0;
+  let screenShake=0;
+  let pulseTime=0;
+  let successEffectTriggered=false;
+
+  let particles=[];
+  let streaks=[];
+  let rings=[];
+  let afterimages=[];
+
+  function clamp(value,minimum,maximum){
+    return Math.max(
+      minimum,
+      Math.min(maximum,value)
+    );
+  }
+
+  function randomRange(minimum,maximum){
+    return minimum+Math.random()*(maximum-minimum);
+  }
+
+  function toRadians(degrees){
+    return degrees*Math.PI/180;
+  }
+
+  function shortestAngleDifference(angleA,angleB){
+    return Math.atan2(
+      Math.sin(angleA-angleB),
+      Math.cos(angleA-angleB)
+    );
+  }
+
+ function currentSwingCycles(){
+
+  /*
+    成功回数に比例する上昇と、
+    後半ほど効いてくる二次曲線を組み合わせる。
+
+    10回目を境に切り替えないため、
+    毎回少しずつ自然に速くなる。
+  */
+  const linearGrowth =
+    score *
+    CFG.swingCycleLinearGrowth;
+
+  const curveGrowth =
+    score *
+    score *
+    CFG.swingCycleCurveGrowth;
+
+  return Math.min(
+    CFG.maximumCycles,
+
+    CFG.baseSwingCycles +
+    linearGrowth +
+    curveGrowth
+  );
+}
+
+  function currentAngleTolerance(){
+
+  /*
+    成功するたびに0.42度ずつ狭くする。
+
+    10回目で突然変化せず、
+    最初から少しずつ厳しくなる。
+  */
+  return Math.max(
+    CFG.minimumAngleTolerance,
+
+    CFG.initialAngleTolerance -
+    score *
+    CFG.angleToleranceLoss
+  );
+}
+
+
+function resetSword(){
+
+  swordX =
+    CFG.swordStartX;
+
+  swordY =
+    CFG.swordStartY;
+
+  swordAngle =
+    -toRadians(
+      CFG.swingDegrees
+    );
+
+  inputAngle = 0;
+
+  swingClock = -Math.PI / 2;
+
+  actionTime = 0;
+
+  successEffectTriggered = false;
+
+  afterimages = [];
+}
+
+  function startGame(){
+
+    score=0;
+
+    particles=[];
+    streaks=[];
+    rings=[];
+    afterimages=[];
+
+    screenFlash=0;
+    screenShake=0;
+    pulseTime=0;
+
+    transitionTime=0;
+    failureTime=0;
+
+    resetSword();
+
+    mode='aim';
+    spaceReady=false;
+  }
+
+  function getSwordTip(x,y,angle){
+
+    return{
+      x:x+Math.cos(angle)*CFG.bladeLength,
+      y:y+Math.sin(angle)*CFG.bladeLength
+    };
+  }
+
+  function isSuccessfulInput(angle){
+
+    const projectedY=
+      CFG.swordStartY+
+      Math.tan(angle)*
+      (CFG.sheathMouthX-CFG.swordStartX);
+
+    const positionIsCorrect=
+      Math.abs(
+        projectedY-CFG.sheathMouthY
+      )<=CFG.mouthHalfHeight;
+
+    const angleDifference=
+      Math.abs(
+        shortestAngleDifference(angle,0)
+      );
+
+    const angleIsCorrect=
+      angleDifference<=
+      toRadians(currentAngleTolerance());
+
+    const directionIsCorrect=
+      Math.cos(angle)>0;
+
+    return(
+      directionIsCorrect &&
+      positionIsCorrect &&
+      angleIsCorrect
+    );
+  }
+
+function launchSword(){
+
+  if(mode !== 'aim'){
+    return;
+  }
+
+  spaceReady = false;
+
+  inputAngle =
+    swordAngle;
+
+  actionTime = 0;
+  afterimages = [];
+
+  if(
+    isSuccessfulInput(
+      inputAngle
+    )
+  ){
+
+    /*
+      成功時は水平へ補正して、
+      高速納刀へ進む。
+    */
+    swordAngle = 0;
+    mode = 'snap';
+
+  }else{
+
+    /*
+      失敗したことは確定しているが、
+      この時点ではゲームオーバーにしない。
+
+      入力した角度のまま刀を飛ばし、
+      実際に鞘の位置へ到達してから
+      衝突するかどうかを判定する。
+    */
+    swordAngle =
+      inputAngle;
+
+    mode = 'missFlight';
+
+    actionTime = 0;
+
+    screenFlash = 0;
+    screenShake = 0;
+  }
+}
+
+  function createFailureEffects(){
+
+    for(let i=0;i<34;i++){
+
+      particles.push({
+        x:CFG.sheathMouthX+randomRange(-12,12),
+        y:CFG.sheathMouthY+randomRange(-20,20),
+
+        vx:randomRange(-310,130),
+        vy:randomRange(-250,250),
+
+        life:randomRange(0.24,0.68),
+        maximumLife:0.68,
+
+        size:randomRange(2,6),
+
+        color:
+          i%3
+            ?'#c8c1b5'
+            :'#ff3024'
+      });
+    }
+  }
+
+  function createSuccessEffects(){
+
+    const effectLevel=score;
+
+    const particleCount=Math.min(
+      180,
+      24+effectLevel*9
+    );
+
+    for(let i=0;i<particleCount;i++){
+
+      let colors=[
+        '#fff9df',
+        '#ffd968',
+        '#ffffff'
+      ];
+
+      if(effectLevel>=5){
+        colors=[
+          '#fff8cf',
+          '#ffd44c',
+          '#ff923d',
+          '#ffffff'
+        ];
+      }
+
+      if(effectLevel>=13){
+        colors=[
+          '#fff8bd',
+          '#ffd13f',
+          '#ff6a2b',
+          '#ff2838',
+          '#ffffff'
+        ];
+      }
+
+      particles.push({
+        x:CFG.sheathMouthX+randomRange(-8,8),
+        y:CFG.sheathMouthY+randomRange(-18,18),
+
+        vx:randomRange(
+          -480-effectLevel*7,
+          260+effectLevel*4
+        ),
+
+        vy:randomRange(
+          -360-effectLevel*4,
+          360+effectLevel*4
+        ),
+
+        life:randomRange(0.24,0.82),
+        maximumLife:0.82,
+
+        size:randomRange(
+          2,
+          5+Math.min(effectLevel,18)*0.22
+        ),
+
+        color:colors[i%colors.length]
+      });
+    }
+
+    const streakCount=Math.min(
+      42,
+      3+effectLevel*2
+    );
+
+    for(let i=0;i<streakCount;i++){
+
+      streaks.push({
+        angle:randomRange(-Math.PI,Math.PI),
+
+        length:randomRange(
+          110,
+          270+effectLevel*12
+        ),
+
+        life:randomRange(0.18,0.46),
+        maximumLife:0.46,
+
+        width:randomRange(
+          1.5,
+          4.5+effectLevel*0.08
+        )
+      });
+    }
+
+    rings.push({
+      life:0.52,
+      maximumLife:0.52,
+      delay:0
+    });
+
+    if(effectLevel>=5){
+      rings.push({
+        life:0.62,
+        maximumLife:0.62,
+        delay:0.07
+      });
+    }
+
+    if(effectLevel>=10){
+      rings.push({
+        life:0.72,
+        maximumLife:0.72,
+        delay:0.14
+      });
+    }
+
+    screenFlash=Math.min(
+      0.58,
+      0.18+effectLevel*0.022
+    );
+
+    screenShake=Math.min(
+      13,
+      2.5+effectLevel*0.5
+    );
+
+    pulseTime=1;
+  }
+
+  function succeed(){
+
+    score+=1;
+
+    createSuccessEffects();
+
+    actionTime=0;
+    mode='impact';
+  }
+
+  function updateEffects(deltaTime){
+
+if(mode === 'impact'){
+ 
+deltaTime *= 5;
+
+}
+
+    screenFlash=Math.max(
+      0,
+      screenFlash-deltaTime*2.5
+    );
+
+    screenShake=Math.max(
+      0,
+      screenShake-deltaTime*24
+    );
+
+    pulseTime=Math.max(
+      0,
+      pulseTime-deltaTime*3
+    );
+
+    for(let i=particles.length-1;i>=0;i--){
+
+      const particle=particles[i];
+
+      particle.life-=deltaTime;
+
+      if(particle.life<=0){
+        particles.splice(i,1);
+        continue;
+      }
+
+      particle.vx*=Math.pow(0.07,deltaTime);
+      particle.vy*=Math.pow(0.07,deltaTime);
+
+      particle.vy+=170*deltaTime;
+
+      particle.x+=particle.vx*deltaTime;
+      particle.y+=particle.vy*deltaTime;
+    }
+
+    for(let i=streaks.length-1;i>=0;i--){
+
+      const streak=streaks[i];
+
+      streak.life-=deltaTime;
+
+      if(streak.life<=0){
+        streaks.splice(i,1);
+      }
+    }
+
+    for(let i=rings.length-1;i>=0;i--){
+
+      const ring=rings[i];
+
+      if(ring.delay>0){
+        ring.delay-=deltaTime;
+      }else{
+        ring.life-=deltaTime;
+      }
+
+      if(ring.life<=0){
+        rings.splice(i,1);
+      }
+    }
+
+    for(let i=afterimages.length-1;i>=0;i--){
+
+      const image=afterimages[i];
+
+      image.life-=deltaTime;
+
+      if(image.life<=0){
+        afterimages.splice(i,1);
+      }
+    }
+  }
+
+  function update(deltaTime){
+
+    updateEffects(deltaTime);
+
+    if(mode==='aim'){
+
+      swingClock+=
+        deltaTime*
+        currentSwingCycles()*
+        TAU;
+
+      swordAngle=
+        Math.sin(swingClock)*
+        toRadians(CFG.swingDegrees);
+
+}else if(mode==='snap'){
+
+  actionTime +=
+    deltaTime;
+
+  const progress =
+    clamp(
+      actionTime /
+      CFG.snapDuration,
+      0,
+      1
+    );
+
+  const easedProgress =
+    1 -
+    Math.pow(
+      1 - progress,
+      4
+    );
+
+  const targetX =
+    CFG.sheathMouthX -
+    CFG.bladeLength;
+
+  swordX =
+    CFG.swordStartX +
+    (
+      targetX -
+      CFG.swordStartX
+    ) *
+    easedProgress;
+
+  swordY =
+    CFG.sheathMouthY;
+
+  swordAngle = 0;
+
+  afterimages.push({
+    x:swordX,
+    y:swordY,
+    angle:0,
+    life:0.10,
+    maximumLife:0.10
+  });
+
+  if(progress >= 1){
+
+    actionTime = 0;
+    mode = 'insert';
+  }
+
+}else if(mode==='insert'){
+
+  actionTime +=
+    deltaTime;
+
+  const progress =
+    clamp(
+      actionTime /
+      CFG.insertionDuration,
+      0,
+      1
+    );
+
+  const easedProgress =
+    1 -
+    Math.pow(
+      1 - progress,
+      3
+    );
+
+  const insertionStartX =
+    CFG.sheathMouthX -
+    CFG.bladeLength;
+
+  /*
+    鍔の中心を鞘口の4px手前で止める。
+  */
+  const guardStopOffset =
+    4;
+
+  const guardStopX =
+    CFG.sheathMouthX -
+    guardStopOffset;
+
+  swordX =
+    insertionStartX +
+    (
+      guardStopX -
+      insertionStartX
+    ) *
+    easedProgress;
+
+  swordY =
+    CFG.sheathMouthY;
+
+  swordAngle = 0;
+
+  /*
+    納刀が70%進んだ瞬間に、
+    スコア加算と成功エフェクトを一度だけ行う。
+  */
+  if(
+    progress >= 0.70 &&
+    !successEffectTriggered
+  ){
+
+    successEffectTriggered =
+      true;
+
+    score += 1;
+
+    createSuccessEffects();
+  }
+
+  /*
+    納刀完了後は短い演出時間へ移る。
+
+    スコアは70%地点ですでに加算済みなので、
+    ここでは加算しない。
+  */
+  if(progress >= 1){
+
+    /*
+      処理落ちなどで70%地点を飛び越えた場合にも、
+      必ず一度だけ成功処理を行う。
+    */
+    if(!successEffectTriggered){
+
+      successEffectTriggered =
+        true;
+
+      score += 1;
+
+      createSuccessEffects();
+    }
+
+    actionTime = 0;
+    mode = 'impact';
+  }
+
+    }else if(mode==='impact'){
+
+      actionTime+=deltaTime;
+
+      const impactDuration=Math.min(
+        0.22,
+        0.10+score*0.006
+      );
+
+      if(actionTime>=impactDuration){
+        mode='fadeOut';
+        transitionTime=0;
+      }
+
+    }else if(mode==='fadeOut'){
+
+      transitionTime+=deltaTime;
+
+      if(
+        transitionTime>=
+        CFG.fadeOutSeconds
+      ){
+        mode='blackHold';
+        transitionTime=0;
+        resetSword();
+      }
+
+    }else if(mode==='blackHold'){
+
+      transitionTime+=deltaTime;
+
+      if(
+        transitionTime>=
+        CFG.blackHoldSeconds
+      ){
+        mode='fadeIn';
+        transitionTime=0;
+      }
+
+}else if(mode==='fadeIn'){
+
+  transitionTime+=deltaTime;
+
+  if(
+    transitionTime>=
+    CFG.fadeInSeconds
+  ){
+    mode='aim';
+    transitionTime=0;
+  }
+
+}else if(mode === 'missFlight'){
+
+  /*
+    移動前の切っ先位置。
+  */
+const oldTip =
+  getSwordTip(
+    swordX,
+    swordY,
+    swordAngle
+  );
+
+  /*
+    SPACEを押した瞬間の角度へ
+    真っすぐ高速で飛ばす。
+
+    重力は加えないため、
+    遠くへ外した場合も入力方向を維持する。
+  */
+  const missFlightSpeed =
+    3500;
+
+  swordX +=
+    Math.cos(
+      inputAngle
+    ) *
+    missFlightSpeed *
+    deltaTime;
+
+  swordY +=
+    Math.sin(
+      inputAngle
+    ) *
+    missFlightSpeed *
+    deltaTime;
+
+  swordAngle =
+    inputAngle;
+
+  /*
+    移動後の切っ先位置。
+  */
+  const newTip =
+    getSwordTip(
+      swordX,
+      swordY,
+      swordAngle
+    );
+
+  /*
+    切っ先が鞘口のX座標を
+    今のフレームで横切ったか確認する。
+  */
+  if(
+    oldTip.x <
+      CFG.sheathMouthX &&
+    newTip.x >=
+      CFG.sheathMouthX
+  ){
+
+    /*
+      フレーム間の正確な横切り位置を求める。
+    */
+    const crossingRatio =
+      (
+        CFG.sheathMouthX -
+        oldTip.x
+      ) /
+      Math.max(
+        0.0001,
+        newTip.x -
+        oldTip.x
+      );
+
+    const crossingY =
+      oldTip.y +
+      (
+        newTip.y -
+        oldTip.y
+      ) *
+      crossingRatio;
+
+    const distanceFromSheath =
+      Math.abs(
+        crossingY -
+        CFG.sheathMouthY
+      );
+
+    /*
+      鞘口の近くを通った場合だけ、
+      実際に鞘へ衝突した扱いにする。
+    */
+    const failureCollisionRange =
+      55;
+
+    if(
+      distanceFromSheath <=
+      failureCollisionRange
+    ){
+
+      /*
+        切っ先を衝突位置へ固定する。
+
+        これにより、鞘へ到達する前に
+        エフェクトが発生しない。
+      */
+      swordX =
+        CFG.sheathMouthX -
+        Math.cos(
+          inputAngle
+        ) *
+        CFG.bladeLength;
+
+      swordY =
+        crossingY -
+        Math.sin(
+          inputAngle
+        ) *
+        CFG.bladeLength;
+
+      createFailureEffects();
+
+      screenFlash = 0.22;
+      screenShake = 9;
+
+      actionTime = 0;
+      mode = 'failureImpact';
+    }
+  }
+
+  /*
+    鞘から大きく外れた刀は、
+    そのまま画面外へ飛んでから
+    ゲームオーバーにする。
+  */
+  const swordTip =
+    getSwordTip(
+      swordX,
+      swordY,
+      swordAngle
+    );
+
+  if(
+    swordTip.x > W + 180 ||
+    swordTip.x < -180 ||
+    swordTip.y < -180 ||
+    swordTip.y > H + 180
+  ){
+
+    mode = 'gameOver';
+    spaceReady = false;
+  }
+
+}else if(mode === 'failureImpact'){
+
+  actionTime +=
+    deltaTime;
+
+  /*
+    鞘へ衝突したあと、
+    刀を少し左下へ弾き返す。
+  */
+  swordX -=
+    130 *
+    deltaTime;
+
+  swordY +=
+    120 *
+    deltaTime;
+
+  swordAngle +=
+    2.8 *
+    deltaTime;
+
+  /*
+    衝突を短時間見せてから
+    ゲームオーバーへ移る。
+  */
+  if(actionTime >= 0.48){
+
+    mode = 'gameOver';
+    spaceReady = false;
+  }
+}
+  }
+
+  function drawBackground(){
+
+    const background=
+      ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        H
+      );
+
+    background.addColorStop(
+      0,
+      '#181411'
+    );
+
+    background.addColorStop(
+      0.66,
+      '#2b241e'
+    );
+
+    background.addColorStop(
+      1,
+      '#100d0b'
+    );
+
+    ctx.fillStyle=background;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.fillStyle=
+      'rgba(232,216,183,.035)';
+
+    for(let y=30;y<H;y+=40){
+      ctx.fillRect(0,y,W,1);
+    }
+
+    ctx.fillStyle='#362c24';
+
+    ctx.fillRect(
+      0,
+      400,
+      W,
+      140
+    );
+
+    ctx.fillStyle='#675548';
+
+    ctx.fillRect(
+      0,
+      400,
+      W,
+      4
+    );
+
+    for(let x=0;x<W;x+=150){
+
+      ctx.fillStyle=
+        x%300
+          ?'#302720'
+          :'#3b3027';
+
+      ctx.fillRect(
+        x,
+        404,
+        146,
+        136
+      );
+    }
+
+    ctx.fillStyle=
+      'rgba(104,25,18,.72)';
+
+    ctx.fillRect(
+      0,
+      0,
+      13,
+      H
+    );
+
+    ctx.fillRect(
+      W-13,
+      0,
+      13,
+      H
+    );
+  }
+
+  function drawSheathBack(){
+
+    ctx.save();
+
+    ctx.translate(
+      CFG.sheathMouthX,
+      CFG.sheathMouthY
+    );
+
+    ctx.shadowColor=
+      'rgba(0,0,0,.62)';
+
+    ctx.shadowBlur=20;
+    ctx.shadowOffsetY=8;
+
+    const sheathGradient=
+      ctx.createLinearGradient(
+        0,
+        -26,
+        0,
+        26
+      );
+
+    sheathGradient.addColorStop(
+      0,
+      '#8b2922'
+    );
+
+    sheathGradient.addColorStop(
+      0.46,
+      '#3b110e'
+    );
+
+    sheathGradient.addColorStop(
+      1,
+      '#130606'
+    );
+
+    ctx.fillStyle=sheathGradient;
+    ctx.strokeStyle='#050202';
+    ctx.lineWidth=4;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      -22
+    );
+
+    ctx.lineTo(
+      CFG.sheathLength-18,
+      -19
+    );
+
+    ctx.quadraticCurveTo(
+      CFG.sheathLength+7,
+      0,
+      CFG.sheathLength-18,
+      19
+    );
+
+    ctx.lineTo(
+      0,
+      22
+    );
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.shadowColor='transparent';
+
+/*
+  鞘口の金具は上下を分割せず、
+  完全な形で奥側に描く。
+*/
+ctx.fillStyle =
+  '#c39a48';
+
+ctx.fillRect(
+  -13,
+  -31,
+  24,
+  62
+);
+
+/*
+  鞘口の黒い穴。
+
+  刀より先に描くことで、
+  刀がこの穴の手前を通るように見せる。
+*/
+ctx.fillStyle =
+  '#100907';
+
+ctx.fillRect(
+  -6,
+  -20,
+  17,
+  40
+);
+
+    ctx.strokeStyle=
+      'rgba(255,222,124,.36)';
+
+    ctx.lineWidth=2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      36,
+      -14
+    );
+
+    ctx.lineTo(
+      CFG.sheathLength-32,
+      -14
+    );
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+function drawSheathFront(){
+
+  ctx.save();
+
+  ctx.translate(
+    CFG.sheathMouthX,
+    CFG.sheathMouthY
+  );
+
+  /*
+    刀の上へ描くのは、
+    鞘口の細い輪郭だけにする。
+
+    金具や黒い穴はdrawSheathBack()で
+    すでに完全な形として描いている。
+  */
+  ctx.strokeStyle =
+    '#f2cf78';
+
+  ctx.lineWidth = 2.5;
+
+  ctx.strokeRect(
+    -12,
+    -30,
+    22,
+    60
+  );
+
+  /*
+    鞘口の左端を少し明るくして、
+    刀が入口を通過しているように見せる。
+  */
+  ctx.strokeStyle =
+    'rgba(255,233,163,.85)';
+
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    -12,
+    -28
+  );
+
+  ctx.lineTo(
+    -12,
+    28
+  );
+
+  ctx.stroke();
+
+  ctx.restore();
+}
+
+function drawSwordAt(
+  x,
+  y,
+  angle,
+  alpha,
+  clipInsertedBlade
+){
+
+  ctx.save();
+
+  ctx.globalAlpha =
+    alpha;
+
+  ctx.translate(
+    x,
+    y
+  );
+
+  ctx.rotate(
+    angle
+  );
+
+  ctx.shadowColor =
+    'rgba(0,0,0,.58)';
+
+  ctx.shadowBlur = 16;
+  ctx.shadowOffsetY = 7;
+
+  /*
+    刀身だけを別の描画状態で描く。
+
+    納刀中は、鞘口より右へ入った刀身だけを隠す。
+    鍔と柄にはクリッピングを適用しない。
+  */
+  ctx.save();
+
+  if(clipInsertedBlade){
+
+    /*
+      現在は座標変換後なので、
+      鞘口の画面座標を刀のローカル座標へ変換する。
+
+      納刀中は刀が水平なので、
+      鞘口までの距離は
+      sheathMouthX - swordX で求められる。
+    */
+    const localSheathMouthX =
+      CFG.sheathMouthX -
+      x;
+
+    ctx.beginPath();
+
+    ctx.rect(
+      -20,
+      -100,
+      localSheathMouthX + 20,
+      200
+    );
+
+    ctx.clip();
+  }
+
+  const bladeGradient =
+    ctx.createLinearGradient(
+      0,
+      -15,
+      0,
+      15
+    );
+
+  bladeGradient.addColorStop(
+    0,
+    '#ffffff'
+  );
+
+  bladeGradient.addColorStop(
+    0.42,
+    '#dce8eb'
+  );
+
+  bladeGradient.addColorStop(
+    0.68,
+    '#84969d'
+  );
+
+  bladeGradient.addColorStop(
+    1,
+    '#f7ffff'
+  );
+
+  ctx.fillStyle =
+    bladeGradient;
+
+  ctx.strokeStyle =
+    '#28343a';
+
+  ctx.lineWidth = 2.5;
+
+  /*
+    刀身。
+  */
+  ctx.beginPath();
+
+  ctx.moveTo(
+    0,
+    -CFG.bladeWidth / 2
+  );
+
+  ctx.lineTo(
+    CFG.bladeLength - 25,
+    -CFG.bladeWidth / 2
+  );
+
+  ctx.lineTo(
+    CFG.bladeLength,
+    0
+  );
+
+  ctx.lineTo(
+    CFG.bladeLength - 25,
+    CFG.bladeWidth / 2
+  );
+
+  ctx.lineTo(
+    0,
+    CFG.bladeWidth / 2
+  );
+
+  ctx.closePath();
+
+  ctx.fill();
+  ctx.stroke();
+
+  /*
+    刃の光。
+  */
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.strokeStyle =
+    'rgba(255,255,255,.9)';
+
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    15,
+    -5
+  );
+
+  ctx.lineTo(
+    CFG.bladeLength - 30,
+    -5
+  );
+
+  ctx.stroke();
+
+  /*
+    ここで刀身用のクリッピングを終了する。
+  */
+  ctx.restore();
+
+  /*
+    ここから鍔と柄。
+
+    刀身用のクリッピングは解除済みなので、
+    鍔が鞘口へ近づいても欠けない。
+  */
+  ctx.shadowColor =
+    'rgba(0,0,0,.42)';
+
+  ctx.shadowBlur = 8;
+  ctx.shadowOffsetY = 4;
+
+  /*
+    鍔。
+  */
+  ctx.fillStyle =
+    '#9ba3a8';
+
+  ctx.beginPath();
+
+  ctx.ellipse(
+    0,
+    0,
+    11,
+    38,
+    0,
+    0,
+    TAU
+  );
+
+  ctx.fill();
+
+  ctx.strokeStyle =
+    '#343b40';
+
+  ctx.lineWidth = 2.5;
+
+  ctx.stroke();
+
+  ctx.shadowColor =
+    'transparent';
+
+  /*
+    柄。
+  */
+  ctx.fillStyle =
+    '#161212';
+
+  ctx.strokeStyle =
+    '#050404';
+
+  ctx.lineWidth = 3;
+
+  ctx.fillRect(
+    -CFG.handleLength,
+    -16,
+    CFG.handleLength,
+    32
+  );
+
+  ctx.strokeRect(
+    -CFG.handleLength,
+    -16,
+    CFG.handleLength,
+    32
+  );
+
+  /*
+    柄巻き。
+  */
+  ctx.strokeStyle =
+    '#983a30';
+
+  ctx.lineWidth = 5;
+
+  for(
+    let handleX =
+      -CFG.handleLength + 8;
+
+    handleX < -2;
+
+    handleX += 16
+  ){
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      handleX,
+      -14
+    );
+
+    ctx.lineTo(
+      handleX + 13,
+      14
+    );
+
+    ctx.stroke();
+  }
+
+  /*
+    柄頭。
+  */
+  ctx.fillStyle =
+    '#747d83';
+
+  ctx.fillRect(
+    -CFG.handleLength - 11,
+    -19,
+    12,
+    38
+  );
+
+  ctx.restore();
+}
+
+  function drawSword(){
+
+    const clipInsertedBlade=
+      mode==='insert' ||
+      mode==='impact' ||
+      mode==='fadeOut';
+
+    for(const image of afterimages){
+
+      drawSwordAt(
+        image.x,
+        image.y,
+        image.angle,
+        (
+          image.life/
+          image.maximumLife
+        )*
+        0.25,
+        clipInsertedBlade
+      );
+    }
+
+    drawSwordAt(
+      swordX,
+      swordY,
+      swordAngle,
+      1,
+      clipInsertedBlade
+    );
+  }
+
+  function drawEffects(){
+
+    for(const streak of streaks){
+
+      const lifeRatio=clamp(
+        streak.life/
+        streak.maximumLife,
+        0,
+        1
+      );
+
+      ctx.save();
+
+      ctx.translate(
+        CFG.sheathMouthX,
+        CFG.sheathMouthY
+      );
+
+      ctx.rotate(streak.angle);
+
+      ctx.strokeStyle=
+        'rgba(255,220,104,'+
+        lifeRatio*0.78+
+        ')';
+
+      ctx.lineWidth=
+        streak.width;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        20,
+        0
+      );
+
+      ctx.lineTo(
+        streak.length,
+        0
+      );
+
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    for(const ring of rings){
+
+      if(ring.delay>0){
+        continue;
+      }
+
+      const progress=
+        1-
+        ring.life/
+        ring.maximumLife;
+
+      const radius=
+        24+
+        progress*
+        (
+          95+
+          score*6
+        );
+
+      ctx.strokeStyle=
+        'rgba(255,219,90,'+
+        (1-progress)*0.75+
+        ')';
+
+      ctx.lineWidth=
+        3+
+        Math.min(score,18)*
+        0.28;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        CFG.sheathMouthX,
+        CFG.sheathMouthY,
+        radius,
+        0,
+        TAU
+      );
+
+      ctx.stroke();
+    }
+
+    for(const particle of particles){
+
+      ctx.save();
+
+      ctx.globalAlpha=clamp(
+        particle.life/
+        particle.maximumLife,
+        0,
+        1
+      );
+
+      ctx.fillStyle=
+        particle.color;
+
+      ctx.shadowColor=
+        particle.color;
+
+      ctx.shadowBlur=
+        score>5
+          ?14
+          :7;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        particle.x,
+        particle.y,
+        particle.size,
+        0,
+        TAU
+      );
+
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    if(
+      score>=16 &&
+      pulseTime>0
+    ){
+
+      ctx.strokeStyle=
+        'rgba(255,239,177,'+
+        pulseTime*0.65+
+        ')';
+
+      ctx.lineWidth=8;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        0,
+        CFG.sheathMouthY-100
+      );
+
+      ctx.lineTo(
+        W,
+        CFG.sheathMouthY+100
+      );
+
+      ctx.stroke();
+    }
+
+/*
+  画面全体の納刀エフェクト。
+
+  鞘口を中心に放射線を出し、
+  画面外周も金色に発光させる。
+
+  成功回数が増えるほど、
+  放射線の数と太さが増える。
+*/
+if(pulseTime > 0){
+
+  const fullScreenEffectAlpha =
+    pulseTime *
+    Math.min(
+      0.72,
+      0.24 +
+      score * 0.025
+    );
+
+  /*
+    画面全体へ伸びる放射線。
+  */
+  const fullScreenLineCount =
+    Math.min(
+      72,
+      10 +
+      score * 3
+    );
+
+  ctx.save();
+
+  ctx.translate(
+    CFG.sheathMouthX,
+    CFG.sheathMouthY
+  );
+
+  ctx.lineCap =
+    'round';
+
+  for(
+    let i = 0;
+    i < fullScreenLineCount;
+    i++
+  ){
+
+    const lineAngle =
+      (
+        i /
+        fullScreenLineCount
+      ) *
+      TAU +
+      score * 0.17;
+
+    const unevenLength =
+      520 +
+      (
+        (
+          i * 73 +
+          score * 41
+        ) %
+        260
+      );
+
+    const startDistance =
+      48 +
+      (
+        i % 5
+      ) *
+      11;
+
+    ctx.strokeStyle =
+      i % 4 === 0
+        ? (
+            'rgba(255,255,225,' +
+            fullScreenEffectAlpha +
+            ')'
+          )
+        : (
+            'rgba(255,202,62,' +
+            (
+              fullScreenEffectAlpha *
+              0.72
+            ) +
+            ')'
+          );
+
+    ctx.lineWidth =
+      1.2 +
+      Math.min(
+        score,
+        20
+      ) *
+      0.08 +
+      (
+        i % 3
+      ) *
+      0.45;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      Math.cos(
+        lineAngle
+      ) *
+      startDistance,
+
+      Math.sin(
+        lineAngle
+      ) *
+      startDistance
+    );
+
+    ctx.lineTo(
+      Math.cos(
+        lineAngle
+      ) *
+      unevenLength,
+
+      Math.sin(
+        lineAngle
+      ) *
+      unevenLength
+    );
+
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  /*
+    画面外周を金色に発光させる。
+  */
+  const edgeGlow =
+    ctx.createRadialGradient(
+      CFG.sheathMouthX,
+      CFG.sheathMouthY,
+      80,
+
+      CFG.sheathMouthX,
+      CFG.sheathMouthY,
+      720
+    );
+
+  edgeGlow.addColorStop(
+    0,
+    'rgba(255,225,115,0)'
+  );
+
+  edgeGlow.addColorStop(
+    0.52,
+    'rgba(255,205,65,0)'
+  );
+
+  edgeGlow.addColorStop(
+    1,
+    'rgba(255,146,25,' +
+    (
+      fullScreenEffectAlpha *
+      0.48
+    ) +
+    ')'
+  );
+
+  ctx.fillStyle =
+    edgeGlow;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+}
+
+    if(screenFlash>0){
+
+      ctx.fillStyle=
+        (
+          score>=5
+            ?'rgba(255,205,55,'
+            :'rgba(255,255,255,'
+        )+
+        screenFlash+
+        ')';
+
+      ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+      );
+    }
+  }
+
+function drawHUD(){
+
+  ctx.save();
+
+  const hudX = 24;
+  const hudY = 20;
+  const hudWidth = 112;
+  const hudHeight = 108;
+
+  ctx.fillStyle =
+    'rgba(8,6,5,.76)';
+
+  ctx.fillRect(
+    hudX,
+    hudY,
+    hudWidth,
+    hudHeight
+  );
+
+  ctx.strokeStyle =
+    'rgba(215,172,76,.7)';
+
+  ctx.lineWidth = 2;
+
+  ctx.strokeRect(
+    hudX + 0.5,
+    hudY + 0.5,
+    hudWidth,
+    hudHeight
+  );
+
+  /*
+    文字と数字を枠の中央へ揃える。
+  */
+  const hudCenterX =
+    hudX +
+    hudWidth / 2;
+
+  ctx.textAlign =
+    'center';
+
+  ctx.textBaseline =
+    'middle';
+
+  /*
+    納刀数ラベル。
+  */
+  ctx.fillStyle =
+    '#d9b760';
+
+  ctx.font =
+    '700 16px sans-serif';
+
+  ctx.fillText(
+    '納刀数',
+    hudCenterX,
+    hudY + 29
+  );
+
+  /*
+    納刀回数。
+  */
+  ctx.fillStyle =
+    '#ffffff';
+
+  ctx.font =
+    '900 46px monospace';
+
+  ctx.fillText(
+    String(score),
+    hudCenterX,
+    hudY + 72
+  );
+
+  ctx.restore();
+}
+
+  function getRank(){
+
+    if(score>=CFG.rankS){
+      return 'S';
+    }
+
+    if(score>=CFG.rankA){
+      return 'A';
+    }
+
+    if(score>=CFG.rankB){
+      return 'B';
+    }
+
+    if(score>=CFG.rankC){
+      return 'C';
+    }
+
+    return 'D';
+  }
+
+function drawTitle(){
+
+  /*
+    明るい和紙色の背景。
+  */
+  const paperGradient =
+    ctx.createLinearGradient(
+      0,
+      0,
+      0,
+      H
+    );
+
+  paperGradient.addColorStop(
+    0,
+    'rgba(249,239,211,.97)'
+  );
+
+  paperGradient.addColorStop(
+    0.55,
+    'rgba(238,218,177,.96)'
+  );
+
+  paperGradient.addColorStop(
+    1,
+    'rgba(205,174,123,.97)'
+  );
+
+  ctx.fillStyle =
+    paperGradient;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  /*
+    和紙らしい薄い繊維線。
+  */
+  ctx.save();
+
+  ctx.globalAlpha =
+    0.13;
+
+  ctx.strokeStyle =
+    '#7c5d38';
+
+  ctx.lineWidth =
+    1;
+
+  for(
+    let y = 12;
+    y < H;
+    y += 18
+  ){
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      0,
+      y +
+      Math.sin(
+        y * 0.09
+      ) *
+      2
+    );
+
+    ctx.lineTo(
+      W,
+      y +
+      Math.cos(
+        y * 0.07
+      ) *
+      2
+    );
+
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  /*
+    上下の朱色の帯。
+  */
+  ctx.fillStyle =
+    '#8f2019';
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    23
+  );
+
+  ctx.fillRect(
+    0,
+    H - 23,
+    W,
+    23
+  );
+
+  /*
+    朱色の帯に細い金線を追加。
+  */
+  ctx.fillStyle =
+    '#d4a742';
+
+  ctx.fillRect(
+    0,
+    23,
+    W,
+    3
+  );
+
+  ctx.fillRect(
+    0,
+    H - 26,
+    W,
+    3
+  );
+
+  /*
+    左右の縦飾り。
+  */
+  ctx.fillStyle =
+    '#a52b21';
+
+  ctx.fillRect(
+    28,
+    26,
+    9,
+    H - 52
+  );
+
+  ctx.fillRect(
+    W - 37,
+    26,
+    9,
+    H - 52
+  );
+
+  ctx.fillStyle =
+    '#d2a347';
+
+  ctx.fillRect(
+    38,
+    26,
+    2,
+    H - 52
+  );
+
+  ctx.fillRect(
+    W - 40,
+    26,
+    2,
+    H - 52
+  );
+
+  /*
+    背景へ薄い円形の家紋風装飾を描く。
+  */
+  ctx.save();
+
+  ctx.translate(
+    W / 2,
+    246
+  );
+
+  ctx.strokeStyle =
+    'rgba(113,71,34,.12)';
+
+  ctx.lineWidth =
+    8;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    0,
+    0,
+    168,
+    0,
+    TAU
+  );
+
+  ctx.stroke();
+
+  ctx.lineWidth =
+    3;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    0,
+    0,
+    135,
+    0,
+    TAU
+  );
+
+  ctx.stroke();
+
+  for(
+    let i = 0;
+    i < 8;
+    i++
+  ){
+
+    const angle =
+      i / 8 * TAU;
+
+    ctx.save();
+
+    ctx.rotate(
+      angle
+    );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      55,
+      0
+    );
+
+    ctx.lineTo(
+      154,
+      0
+    );
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  ctx.restore();
+
+  /*
+    タイトルの後ろに朱色の印章風パネル。
+  */
+  ctx.fillStyle =
+    'rgba(145,30,22,.93)';
+
+  ctx.fillRect(
+    252,
+    67,
+    456,
+    102
+  );
+
+  ctx.strokeStyle =
+    '#d9ae53';
+
+  ctx.lineWidth =
+    4;
+
+  ctx.strokeRect(
+    257,
+    72,
+    446,
+    92
+  );
+
+  ctx.strokeStyle =
+    'rgba(255,238,184,.8)';
+
+  ctx.lineWidth =
+    1;
+
+  ctx.strokeRect(
+    265,
+    80,
+    430,
+    76
+  );
+
+  /*
+    タイトル。
+  */
+  ctx.textAlign =
+    'center';
+
+  ctx.textBaseline =
+    'middle';
+
+  ctx.fillStyle =
+    '#fff4d1';
+
+  ctx.shadowColor =
+    'rgba(47,14,10,.65)';
+
+  ctx.shadowBlur =
+    8;
+
+  ctx.shadowOffsetY =
+    3;
+
+  ctx.font =
+    '900 61px serif';
+
+  ctx.fillText(
+    '刹那納刀',
+    W / 2,
+    118
+  );
+
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.shadowBlur =
+    0;
+
+  ctx.shadowOffsetY =
+    0;
+
+  /*
+    タイトル下の飾り線。
+  */
+  ctx.strokeStyle =
+    '#9d2a20';
+
+  ctx.lineWidth =
+    3;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    237,
+    197
+  );
+
+  ctx.lineTo(
+    405,
+    197
+  );
+
+  ctx.moveTo(
+    555,
+    197
+  );
+
+  ctx.lineTo(
+    723,
+    197
+  );
+
+  ctx.stroke();
+
+  ctx.fillStyle =
+    '#c99b3e';
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    W / 2,
+    184
+  );
+
+  ctx.lineTo(
+    W / 2 + 13,
+    197
+  );
+
+  ctx.lineTo(
+    W / 2,
+    210
+  );
+
+  ctx.lineTo(
+    W / 2 - 13,
+    197
+  );
+
+  ctx.closePath();
+
+  ctx.fill();
+
+  /*
+    操作説明用の明るい和紙パネル。
+  */
+  ctx.fillStyle =
+    'rgba(255,249,226,.76)';
+
+  ctx.fillRect(
+    204,
+    224,
+    552,
+    155
+  );
+
+  ctx.strokeStyle =
+    'rgba(122,75,34,.56)';
+
+  ctx.lineWidth =
+    2;
+
+  ctx.strokeRect(
+    204.5,
+    224.5,
+    552,
+    155
+  );
+
+  /*
+    パネル四隅の朱色飾り。
+  */
+  ctx.strokeStyle =
+    '#a62e23';
+
+  ctx.lineWidth =
+    4;
+
+  const cornerSize =
+    23;
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    204,
+    224 + cornerSize
+  );
+
+  ctx.lineTo(
+    204,
+    224
+  );
+
+  ctx.lineTo(
+    204 + cornerSize,
+    224
+  );
+
+  ctx.moveTo(
+    756 - cornerSize,
+    224
+  );
+
+  ctx.lineTo(
+    756,
+    224
+  );
+
+  ctx.lineTo(
+    756,
+    224 + cornerSize
+  );
+
+  ctx.moveTo(
+    204,
+    379 - cornerSize
+  );
+
+  ctx.lineTo(
+    204,
+    379
+  );
+
+  ctx.lineTo(
+    204 + cornerSize,
+    379
+  );
+
+  ctx.moveTo(
+    756 - cornerSize,
+    379
+  );
+
+  ctx.lineTo(
+    756,
+    379
+  );
+
+  ctx.lineTo(
+    756,
+    379 - cornerSize
+  );
+
+  ctx.stroke();
+
+  /*
+    説明文。
+  */
+  ctx.fillStyle =
+    '#2d2119';
+
+  ctx.font =
+    '700 22px serif';
+
+  ctx.fillText(
+    '刀の角度を合わせ、SPACEで一気に納刀',
+    W / 2,
+    261
+  );
+
+  ctx.fillStyle =
+    '#634b38';
+
+  ctx.font =
+    '600 17px serif';
+
+  ctx.fillText(
+    '成功するたび、刀の動きは少しずつ速くなる',
+    W / 2,
+    307
+  );
+
+  ctx.fillText(
+    '一度でも外せば、その場で終了',
+    W / 2,
+    342
+  );
+
+  /*
+    開始ボタン風表示。
+  */
+  const buttonGradient =
+    ctx.createLinearGradient(
+      0,
+      414,
+      0,
+      478
+    );
+
+  buttonGradient.addColorStop(
+    0,
+    '#c64130'
+  );
+
+  buttonGradient.addColorStop(
+    1,
+    '#882018'
+  );
+
+  ctx.fillStyle =
+    buttonGradient;
+
+  ctx.fillRect(
+    328,
+    414,
+    304,
+    64
+  );
+
+  ctx.strokeStyle =
+    '#e0b65f';
+
+  ctx.lineWidth =
+    3;
+
+  ctx.strokeRect(
+    328.5,
+    414.5,
+    304,
+    64
+  );
+
+  ctx.fillStyle =
+    '#fff0c8';
+
+  ctx.shadowColor =
+    'rgba(45,9,5,.55)';
+
+  ctx.shadowBlur =
+    5;
+
+  ctx.shadowOffsetY =
+    2;
+
+  ctx.font =
+    '900 26px serif';
+
+  ctx.fillText(
+    'SPACE で開始',
+    W / 2,
+    447
+  );
+
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.shadowBlur =
+    0;
+
+  ctx.shadowOffsetY =
+    0;
+
+  /*
+    下部の小さな装飾文字。
+  */
+  ctx.fillStyle =
+    '#6c4d32';
+
+  ctx.font =
+    '600 13px serif';
+
+  ctx.fillText(
+    '刃を見極め　一瞬を制す',
+    W / 2,
+    503
+  );
+}
+
+function drawGameOver(){
+
+  ctx.fillStyle =
+    'rgba(0,0,0,.76)';
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  ctx.textAlign =
+    'center';
+
+  ctx.textBaseline =
+    'middle';
+
+  /*
+    GAME OVERをグレー文字と黒縁で描画する。
+  */
+  ctx.font =
+    '900 58px sans-serif';
+
+  ctx.lineJoin =
+    'round';
+
+  ctx.miterLimit =
+    2;
+
+  ctx.strokeStyle =
+    '#090909';
+
+  ctx.lineWidth =
+    10;
+
+  ctx.strokeText(
+    'GAME OVER',
+    W / 2,
+    104
+  );
+
+  const gameOverGradient =
+    ctx.createLinearGradient(
+      0,
+      72,
+      0,
+      132
+    );
+
+  gameOverGradient.addColorStop(
+    0,
+    '#e0e3e5'
+  );
+
+  gameOverGradient.addColorStop(
+    0.5,
+    '#9ba1a5'
+  );
+
+  gameOverGradient.addColorStop(
+    1,
+    '#656b70'
+  );
+
+  ctx.fillStyle =
+    gameOverGradient;
+
+  ctx.shadowColor =
+    'rgba(0,0,0,.8)';
+
+  ctx.shadowBlur =
+    12;
+
+  ctx.shadowOffsetY =
+    5;
+
+  ctx.fillText(
+    'GAME OVER',
+    W / 2,
+    104
+  );
+
+  /*
+    以降の文字へ影や縁取りが影響しないように戻す。
+  */
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.shadowBlur =
+    0;
+
+  ctx.shadowOffsetY =
+    0;
+
+  ctx.lineWidth =
+    1;
+
+  /*
+    納刀数。
+  */
+  ctx.fillStyle =
+    '#d0c2aa';
+
+  ctx.font =
+    '700 20px sans-serif';
+
+  ctx.fillText(
+    '納刀数',
+    W / 2,
+    190
+  );
+
+  ctx.fillStyle =
+    '#ffffff';
+
+  ctx.font =
+    '900 72px monospace';
+
+  ctx.fillText(
+    String(score),
+    W / 2,
+    252
+  );
+
+  /*
+    RANKの見出しは白。
+  */
+  ctx.fillStyle =
+    '#ffffff';
+
+  ctx.font =
+    '900 30px sans-serif';
+
+  ctx.fillText(
+    'RANK',
+    W / 2,
+    333
+  );
+
+  /*
+    ランクごとの文字色。
+  */
+  const resultRank =
+    getRank();
+
+  ctx.font =
+    '900 96px serif';
+
+  ctx.shadowBlur =
+    18;
+
+  if(resultRank === 'S'){
+
+    /*
+      Sはオレンジとピンクのグラデーション。
+    */
+    const rankGradient =
+      ctx.createLinearGradient(
+        0,
+        360,
+        0,
+        445
+      );
+
+    rankGradient.addColorStop(
+      0,
+      '#ff8a24'
+    );
+
+    rankGradient.addColorStop(
+      0.48,
+      '#ff5f68'
+    );
+
+    rankGradient.addColorStop(
+      1,
+      '#ff58bd'
+    );
+
+    ctx.fillStyle =
+      rankGradient;
+
+    ctx.shadowColor =
+      '#ff6588';
+
+  }else if(resultRank === 'A'){
+
+    ctx.fillStyle =
+      '#ff62c8';
+
+    ctx.shadowColor =
+      '#ff3fae';
+
+  }else if(resultRank === 'B'){
+
+    ctx.fillStyle =
+      '#ff3b30';
+
+    ctx.shadowColor =
+      '#ff1e16';
+
+  }else if(resultRank === 'C'){
+
+    ctx.fillStyle =
+      '#ff8a24';
+
+    ctx.shadowColor =
+      '#ff6918';
+
+  }else{
+
+    ctx.fillStyle =
+      '#ffd43b';
+
+    ctx.shadowColor =
+      '#ffb300';
+  }
+
+  ctx.fillText(
+    resultRank,
+    W / 2,
+    410
+  );
+
+  /*
+    最下部の文字へ影を残さない。
+  */
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.shadowBlur =
+    0;
+
+  ctx.shadowOffsetY =
+    0;
+
+  ctx.fillStyle =
+    '#f1eadc';
+
+  ctx.font =
+    '700 20px sans-serif';
+
+  ctx.fillText(
+    'SPACEでもう一度',
+    W / 2,
+    496
+  );
+}
+
+  function getTransitionOpacity(){
+
+    if(mode==='fadeOut'){
+
+      return clamp(
+        transitionTime/
+        CFG.fadeOutSeconds,
+        0,
+        1
+      );
+    }
+
+    if(mode==='blackHold'){
+      return 1;
+    }
+
+    if(mode==='fadeIn'){
+
+      return(
+        1-
+        clamp(
+          transitionTime/
+          CFG.fadeInSeconds,
+          0,
+          1
+        )
+      );
+    }
+
+    return 0;
+  }
+
+  function render(){
+
+    ctx.setTransform(
+      canvasScale,
+      0,
+      0,
+      canvasScale,
+      canvasOffsetX,
+      canvasOffsetY
+    );
+
+    ctx.clearRect(
+      -canvasOffsetX/
+      canvasScale,
+
+      -canvasOffsetY/
+      canvasScale,
+
+      canvas.width/
+      canvasScale,
+
+      canvas.height/
+      canvasScale
+    );
+
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.rect(0,0,W,H);
+    ctx.clip();
+
+    if(screenShake>0){
+
+      ctx.translate(
+        randomRange(
+          -screenShake,
+          screenShake
+        ),
+
+        randomRange(
+          -screenShake,
+          screenShake
+        )
+      );
+    }
+
+ drawBackground();
+
+/*
+  納刀完了直後だけ、
+  刀と鞘を一緒に細かく振動させる。
+
+  actionTimeが進むほど急速に揺れが弱くなる。
+*/
+let impactShakeX = 0;
+let impactShakeY = 0;
+let impactRotation = 0;
+
+if(mode === 'impact'){
+
+  const impactPower =
+    Math.max(
+      0,
+      1 -
+      actionTime /
+      0.18
+    );
+
+  impactShakeX =
+    Math.sin(
+      actionTime * 145
+    ) *
+    8 *
+    impactPower;
+
+  impactShakeY =
+    Math.sin(
+      actionTime * 190
+    ) *
+    4 *
+    impactPower;
+
+  impactRotation =
+    Math.sin(
+      actionTime * 130
+    ) *
+    0.012 *
+    impactPower;
+}
+
+/*
+  刀と鞘だけへ納刀時の振動を適用する。
+*/
+ctx.save();
+
+ctx.translate(
+  impactShakeX,
+  impactShakeY
+);
+
+/*
+  鞘口を中心に、ごくわずかに回転させる。
+*/
+ctx.translate(
+  CFG.sheathMouthX,
+  CFG.sheathMouthY
+);
+
+ctx.rotate(
+  impactRotation
+);
+
+ctx.translate(
+  -CFG.sheathMouthX,
+  -CFG.sheathMouthY
+);
+
+drawSheathBack();
+drawSheathFront();
+drawSword();
+
+ctx.restore();
+
+/*
+  エフェクトは固定位置に描く。
+
+  刀と鞘が揺れても、
+  衝撃波や火花の中心は鞘口付近に残る。
+*/
+drawEffects();
+
+    ctx.restore();
+
+    if(mode!=='title'){
+      drawHUD();
+    }
+
+    if(mode==='title'){
+      drawTitle();
+    }
+
+    if(mode==='gameOver'){
+      drawGameOver();
+    }
+
+    const transitionOpacity=
+      getTransitionOpacity();
+
+    if(transitionOpacity>0){
+
+      ctx.fillStyle=
+        'rgba(0,0,0,'+
+        transitionOpacity+
+        ')';
+
+      ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+      );
+    }
+  }
+
+  function keyDown(event){
+
+    if(event.code!=='Space'){
+      return;
+    }
+
+    event.preventDefault();
+
+    if(event.repeat){
+      return;
+    }
+
+    if(mode==='title'){
+
+      startGame();
+      return;
+    }
+
+    if(mode==='gameOver'){
+
+      if(spaceReady){
+        startGame();
+      }
+
+      return;
+    }
+
+    if(
+      mode==='aim' &&
+      spaceReady
+    ){
+      launchSword();
+    }
+  }
+
+  function keyUp(event){
+
+    if(event.code!=='Space'){
+      return;
+    }
+
+    event.preventDefault();
+
+    spaceReady=true;
+  }
+
+  function resize(){
+
+    if(
+      !root ||
+      !canvas
+    ){
+      return;
+    }
+
+    const rect=
+      root.getBoundingClientRect();
+
+    const pixelRatio=
+      Math.min(
+        window.devicePixelRatio||1,
+        2
+      );
+
+    canvas.width=Math.max(
+      1,
+      Math.round(
+        rect.width*
+        pixelRatio
+      )
+    );
+
+    canvas.height=Math.max(
+      1,
+      Math.round(
+        rect.height*
+        pixelRatio
+      )
+    );
+
+    canvasScale=Math.min(
+      canvas.width/W,
+      canvas.height/H
+    );
+
+    canvasOffsetX=
+      (
+        canvas.width-
+        W*canvasScale
+      )/2;
+
+    canvasOffsetY=
+      (
+        canvas.height-
+        H*canvasScale
+      )/2;
+  }
+
+  function gameLoop(timestamp){
+
+    if(destroyed){
+      return;
+    }
+
+    const deltaTime=
+      previousTime
+        ?Math.min(
+            0.033,
+            (
+              timestamp-
+              previousTime
+            )/1000
+          )
+        :0;
+
+    previousTime=timestamp;
+
+    update(deltaTime);
+    render();
+
+    animationFrame=
+      requestAnimationFrame(
+        gameLoop
+      );
+  }
+
+  function focusGame(){
+
+    if(root){
+      root.focus();
+    }
+  }
+
+  function mount(target){
+
+    destroyed=false;
+    previousTime=0;
+
+    root=
+      document.createElement(
+        'div'
+      );
+
+    root.className='tsg-root';
+    root.tabIndex=0;
+
+    root.setAttribute(
+      'aria-label',
+      '刹那納刀'
+    );
+
+    canvas=
+      document.createElement(
+        'canvas'
+      );
+
+    const hint=
+      document.createElement(
+        'div'
+      );
+
+    hint.className='tsg-focus';
+
+    hint.textContent=
+      '画面をクリックして操作';
+
+    root.appendChild(canvas);
+    root.appendChild(hint);
+
+    target.appendChild(root);
+
+    ctx=canvas.getContext('2d');
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      focusGame
+    );
+
+    animationFrame=
+      requestAnimationFrame(
+        gameLoop
+      );
+
+    setTimeout(
+      focusGame,
+      0
+    );
+  }
+
+  function destroy(){
+
+    if(destroyed){
+      return;
+    }
+
+    destroyed=true;
+
+    cancelAnimationFrame(
+      animationFrame
+    );
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+
+      root.removeEventListener(
+        'pointerdown',
+        focusGame
+      );
+
+      root.remove();
+    }
+
+    root=null;
+    canvas=null;
+    ctx=null;
+
+    particles=[];
+    streaks=[];
+    rings=[];
+    afterimages=[];
+  }
+
+  return{
+    mount:mount,
+    destroy:destroy
+  };
+}
+
+const game={
+  id:GAME_ID,
+  name:'刹那納刀',
+  instance:null,
+
+  mount:function(target){
+
+    this.destroy();
+
+    this.instance=
+      createGame();
+
+    this.instance.mount(
+      target
+    );
+  },
+
+  destroy:function(){
+
+    if(this.instance){
+
+      this.instance.destroy();
+      this.instance=null;
+    }
+  }
+};
+
+if(
+  window.MiniGames &&
+  typeof window.MiniGames.register===
+    'function'
+){
+
+  window.MiniGames.register(
+    game
+  );
+
+}else{
+
+  document.documentElement.style.width=
+    '100%';
+
+  document.documentElement.style.height=
+    '100%';
+
+  document.body.style.cssText=
+    'margin:0;'+
+    'width:100%;'+
+    'height:100%;'+
+    'overflow:hidden;'+
+    'background:#000;';
+
+  const host=
+    document.createElement(
+      'div'
+    );
+
+  host.style.cssText=
+    'position:fixed;'+
+    'inset:0;'+
+    'width:100%;'+
+    'height:100%;'+
+    'background:#000;';
+
+  document.body.appendChild(
+    host
+  );
+
+  game.mount(host);
+}
+
+})();
+</script>
+<!-- ==================================================================================== GAME BLOCK 09 END ==================================================================================== -->
+
+
+
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 10
+     SHOOT THE CUE BALL
+======================================================================================================================================================================================================= -->
+<style>
+.stcb-root{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:520px;
+  overflow:hidden;
+  background:#000;
+  outline:none;
+  user-select:none;
+  -webkit-user-select:none;
+  font-family:Arial,"Yu Gothic",sans-serif;
+}
+
+.stcb-root canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+
+.stcb-focus{
+  position:absolute;
+  right:10px;
+  bottom:8px;
+  color:rgba(255,255,255,.60);
+  font-size:11px;
+  pointer-events:none;
+}
+
+.stcb-root:focus .stcb-focus{
+  display:none;
+}
+</style>
+
+<script>
+(function(){
+
+'use strict';
+
+const GAME_ID = 'shot-the-cue-ball';
+
+function createGame(){
+
+  const W = 600;
+  const H = 800;
+  const TAU = Math.PI * 2;
+
+  /*
+    ========================================
+    調整用設定
+    ========================================
+  */
+  const CFG = {
+
+    /*
+      ゲーム進行。
+    */
+    totalRounds:3,
+    maximumRoundScore:100,
+
+    /*
+      照準。
+    */
+    aimX:300,
+    aimY:590,
+    crosshairRadius:30,
+
+/*
+  キューボール出現時間。
+
+  早いパターンでは、
+  開始直後から突然出現する可能性がある。
+*/
+cueEarlyMinimumDelay:0.05,
+cueEarlyMaximumDelay:0.80,
+
+cueNormalMinimumDelay:0.90,
+cueNormalMaximumDelay:4.60,
+
+cueLateMinimumDelay:4.20,
+cueLateMaximumDelay:8.00,
+
+/*
+  早い、普通、遅いパターンの確率。
+*/
+cueEarlyChance:0.30,
+cueNormalChance:0.45,
+cueLateChance:0.25,
+
+    /*
+      前ラウンドと似た出現時間を避ける。
+    */
+    minimumCueTimeDifference:1.15,
+    cueTimeRerollCount:16,
+
+firstFakeDelayMin:0.25,
+firstFakeDelayMax:0.85,
+
+fakeIntervalMin:0.55,
+fakeIntervalMax:1.25,
+
+fakePauseChance:0.16,
+fakePauseMin:0.80,
+fakePauseMax:1.55,
+
+fakeBurstChance:0.18,
+fakeBurstMinimumCount:2,
+fakeBurstMaximumCount:2,
+fakeBurstIntervalMin:0.14,
+fakeBurstIntervalMax:0.24,
+
+maximumVisibleFakeBalls:3,
+
+    /*
+      ナンバーボールの出現位置。
+    */
+    fakeHorizontalMargin:70,
+    fakeCueSeparation:112,
+    minimumBallSeparation:102,
+
+/*
+  キューボールとナンバーボールの隙間。
+*/
+cueBallSafetyGap:12,
+
+    /*
+      ボール。
+    */
+    ballRadius:50,
+
+    fallSpeed:1125,
+
+    ballStartY:-80,
+    ballRemoveY:900,
+
+    /*
+      ナンバーボールの回転。
+    */
+    ballSpinMin:1.00,
+    ballSpinMax:1.70,
+
+    ballLatitudeSpeedMin:0.15,
+    ballLatitudeSpeedMax:0.34,
+
+    /*
+      射撃演出。
+    */
+    shotFreezeSeconds:0.16,
+    shotFlashSeconds:0.09,
+    shotSparkCount:24,
+
+    /*
+      暗転。
+    */
+    fadeOutSeconds:0.18,
+    blackHoldSeconds:0.13,
+    fadeInSeconds:0.22,
+
+    /*
+      リザルト。
+    */
+    resultRevealDelay:0.08,
+    resultBallRadius:94,
+
+    /*
+      得点カーブ。
+
+      大きいほど中心以外の減点が厳しくなる。
+    */
+    scoreCurvePower:1.35,
+
+    /*
+      合計スコアのランク。
+    */
+finalRankS:250,
+finalRankA:220,
+finalRankB:180,
+finalRankC:140,
+finalRankD:100,
+finalRankE:50,
+
+    /*
+      背景。
+    */
+    floorY:700,
+
+    /*
+      弾痕。
+
+      大きすぎない現実的な穿孔として描く。
+    */
+    bulletHoleRadius:2.7,
+    bulletRimRadius:5.0,
+    bulletResidueRadius:8.5,
+
+    bulletCrackMinimumCount:2,
+    bulletCrackMaximumCount:4,
+
+    bulletCrackMinimumLength:3.5,
+    bulletCrackMaximumLength:8.0,
+
+    /*
+      デバッグ表示。
+    */
+    debug:false
+  };
+
+  let root = null;
+  let canvas = null;
+  let ctx = null;
+
+  let animationFrame = 0;
+  let previousTime = 0;
+  let destroyed = false;
+
+  let canvasScale = 1;
+  let canvasOffsetX = 0;
+  let canvasOffsetY = 0;
+
+  let mode = 'title';
+
+  let currentRound = 1;
+  let roundScore = 0;
+  let totalScore = 0;
+
+  let elapsedTime = 0;
+  let shotTime = 0;
+  let transitionTime = 0;
+  let resultTime = 0;
+
+  let spaceReady = false;
+
+  let cueSpawnTime = 0;
+  let previousCueSpawnTime = -100;
+
+  let cueSpawned = false;
+  let cueEscaped = false;
+
+  let nextFakeSpawnTime = 0;
+  let fakeBurstRemaining = 0;
+
+  let shotUsed = false;
+  let shotKind = 'none';
+
+  let shotLocalX = 0;
+  let shotLocalY = 0;
+  let shotDistanceRatio = Infinity;
+
+  let resultNumber = 0;
+  let resultImpactSeed = 1;
+
+  let balls = [];
+  let sparks = [];
+
+  let screenFlash = 0;
+  let recoil = 0;
+
+  function clamp(value,minimum,maximum){
+
+    return Math.max(
+      minimum,
+      Math.min(
+        maximum,
+        value
+      )
+    );
+  }
+
+  function randomRange(minimum,maximum){
+
+    return (
+      minimum +
+      Math.random() *
+      (
+        maximum -
+        minimum
+      )
+    );
+  }
+
+  function randomInteger(minimum,maximum){
+
+    return Math.floor(
+      randomRange(
+        minimum,
+        maximum + 1
+      )
+    );
+  }
+
+  function randomDirection(){
+
+    return (
+      Math.random() < 0.5
+        ? -1
+        : 1
+    );
+  }
+
+  function normalizeAngle(angle){
+
+    angle %= TAU;
+
+    if(angle > Math.PI){
+      angle -= TAU;
+    }
+
+    if(angle < -Math.PI){
+      angle += TAU;
+    }
+
+    return angle;
+  }
+
+  function easeOutCubic(progress){
+
+    return (
+      1 -
+      Math.pow(
+        1 - progress,
+        3
+      )
+    );
+  }
+
+  /*
+    弾痕を毎フレーム同じ形で描くための
+    固定乱数。
+  */
+  function seededRandom(seed){
+
+    const value =
+      Math.sin(
+        seed * 12.9898 +
+        78.233
+      ) *
+      43758.5453;
+
+    return (
+      value -
+      Math.floor(
+        value
+      )
+    );
+  }
+
+  function chooseCueSpawnTime(){
+
+    let selectedTime = 0;
+
+    for(
+      let attempt = 0;
+      attempt < CFG.cueTimeRerollCount;
+      attempt++
+    ){
+
+      const selection = Math.random();
+
+      if(
+        selection <
+        CFG.cueEarlyChance
+      ){
+
+        selectedTime =
+          randomRange(
+            CFG.cueEarlyMinimumDelay,
+            CFG.cueEarlyMaximumDelay
+          );
+
+      }else if(
+        selection <
+        CFG.cueEarlyChance +
+        CFG.cueNormalChance
+      ){
+
+        selectedTime =
+          randomRange(
+            CFG.cueNormalMinimumDelay,
+            CFG.cueNormalMaximumDelay
+          );
+
+      }else{
+
+        selectedTime =
+          randomRange(
+            CFG.cueLateMinimumDelay,
+            CFG.cueLateMaximumDelay
+          );
+      }
+
+      /*
+        1ラウンド目はそのまま採用する。
+
+        2、3ラウンド目は、
+        前回と十分違う時間なら採用する。
+      */
+      if(
+        currentRound === 1 ||
+        Math.abs(
+          selectedTime -
+          previousCueSpawnTime
+        ) >=
+        CFG.minimumCueTimeDifference
+      ){
+
+        return selectedTime;
+      }
+    }
+
+    /*
+      再抽選上限に達した場合。
+    */
+    return selectedTime;
+  }
+
+  function startNewGame(){
+
+    currentRound = 1;
+    roundScore = 0;
+    totalScore = 0;
+
+    previousCueSpawnTime = -100;
+
+    startRound();
+  }
+
+  function startRound(){
+
+    elapsedTime = 0;
+    shotTime = 0;
+    transitionTime = 0;
+    resultTime = 0;
+
+    cueSpawned = false;
+    cueEscaped = false;
+
+    shotUsed = false;
+    shotKind = 'none';
+
+    shotLocalX = 0;
+    shotLocalY = 0;
+    shotDistanceRatio = Infinity;
+
+    roundScore = 0;
+    resultNumber = 0;
+    resultImpactSeed = 1;
+
+    balls = [];
+    sparks = [];
+
+    screenFlash = 0;
+    recoil = 0;
+
+    cueSpawnTime =
+      chooseCueSpawnTime();
+
+    previousCueSpawnTime =
+      cueSpawnTime;
+
+    nextFakeSpawnTime =
+      randomRange(
+        CFG.firstFakeDelayMin,
+        CFG.firstFakeDelayMax
+      );
+
+    fakeBurstRemaining = 0;
+
+    mode = 'play';
+    spaceReady = false;
+  }
+
+  function countVisibleFakeBalls(){
+
+    let count = 0;
+
+    for(const ball of balls){
+
+      if(
+        ball.kind ===
+        'number'
+      ){
+
+        count++;
+      }
+    }
+
+    return count;
+  }
+
+  function isFakePositionAvailable(positionX){
+
+    for(const ball of balls){
+
+      /*
+        新しく出現するボールと、
+        画面上部付近の既存ボールが
+        重ならないようにする。
+      */
+      if(
+        ball.y <
+        CFG.ballRadius * 3.0
+      ){
+
+        if(
+          Math.abs(
+            ball.x -
+            positionX
+          ) <
+          CFG.minimumBallSeparation
+        ){
+
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+function chooseFakePosition(){
+
+  /*
+    キューボールとナンバーボールが
+    接触しないために必要な中心間距離。
+  */
+  const requiredDistance =
+    CFG.ballRadius * 2 +
+    CFG.cueBallSafetyGap;
+
+  /*
+    ナンバーボールとキューボールの
+    出現時刻の差から、縦方向の距離を計算する。
+
+    全ボールが同じ速度なので、
+    この縦方向の距離は落下中も変わらない。
+  */
+  const spawnTimeDifference =
+    nextFakeSpawnTime -
+    cueSpawnTime;
+
+  const verticalDistance =
+    Math.abs(
+      spawnTimeDifference *
+      CFG.fallSpeed
+    );
+
+  for(
+    let attempt = 0;
+    attempt < 30;
+    attempt++
+  ){
+
+    const positionX =
+      randomRange(
+        CFG.fakeHorizontalMargin,
+        W -
+        CFG.fakeHorizontalMargin
+      );
+
+    let positionIsAvailable =
+      true;
+
+    /*
+      すでに画面上部にいるボールとの
+      出現直後の重なりを避ける。
+    */
+    for(const ball of balls){
+
+      if(
+        ball.y <
+        CFG.ballRadius * 3
+      ){
+
+        const horizontalDistance =
+          ball.x -
+          positionX;
+
+        const verticalSeparation =
+          ball.y -
+          CFG.ballStartY;
+
+        const distance =
+          Math.hypot(
+            horizontalDistance,
+            verticalSeparation
+          );
+
+        if(
+          distance <
+          requiredDistance
+        ){
+
+          positionIsAvailable =
+            false;
+
+          break;
+        }
+      }
+    }
+
+    if(!positionIsAvailable){
+      continue;
+    }
+
+    /*
+      キューボールとの将来的な接触を判定する。
+
+      ナンバーボールは中央を通ってもよい。
+      縦横を合わせた中心間距離が十分なら、
+      中央付近でも出現できる。
+    */
+    const horizontalDistanceFromCue =
+      Math.abs(
+        positionX -
+        CFG.aimX
+      );
+
+    const distanceFromCue =
+      Math.hypot(
+        horizontalDistanceFromCue,
+        verticalDistance
+      );
+
+    if(
+      distanceFromCue <
+      requiredDistance
+    ){
+
+      continue;
+    }
+
+    return positionX;
+  }
+
+  /*
+    安全な位置が見つからなければ、
+    無理に出現させない。
+  */
+  return null;
+}
+
+  function scheduleNextFake(){
+
+    /*
+      バースト途中。
+    */
+    if(fakeBurstRemaining > 0){
+
+      fakeBurstRemaining--;
+
+      nextFakeSpawnTime =
+        elapsedTime +
+        randomRange(
+          CFG.fakeBurstIntervalMin,
+          CFG.fakeBurstIntervalMax
+        );
+
+      return;
+    }
+
+    /*
+      新しいバーストを開始する。
+    */
+    if(
+      Math.random() <
+      CFG.fakeBurstChance
+    ){
+
+      fakeBurstRemaining =
+        randomInteger(
+          CFG.fakeBurstMinimumCount,
+          CFG.fakeBurstMaximumCount
+        ) -
+        1;
+
+      nextFakeSpawnTime =
+        elapsedTime +
+        randomRange(
+          CFG.fakeBurstIntervalMin,
+          CFG.fakeBurstIntervalMax
+        );
+
+      return;
+    }
+
+    /*
+      ときどき長い間を作る。
+
+      ただし毎回ではないため、
+      空白後に必ずキューボールが来るとは限らない。
+    */
+    if(
+      Math.random() <
+      CFG.fakePauseChance
+    ){
+
+      nextFakeSpawnTime =
+        elapsedTime +
+        randomRange(
+          CFG.fakePauseMin,
+          CFG.fakePauseMax
+        );
+
+      return;
+    }
+
+    nextFakeSpawnTime =
+      elapsedTime +
+      randomRange(
+        CFG.fakeIntervalMin,
+        CFG.fakeIntervalMax
+      );
+  }
+
+function spawnFakeBall(){
+
+  if(
+    countVisibleFakeBalls() >=
+    CFG.maximumVisibleFakeBalls
+  ){
+
+    nextFakeSpawnTime =
+      elapsedTime + 0.12;
+
+    return;
+  }
+
+  const positionX =
+    chooseFakePosition();
+
+  /*
+    安全な位置がない場合は、
+    今回のフェイントを出さずに少し待つ。
+
+    危険な位置へ強制出現させない。
+  */
+  if(positionX === null){
+
+    nextFakeSpawnTime =
+      elapsedTime +
+      randomRange(
+        0.12,
+        0.25
+      );
+
+    return;
+  }
+
+  createBall(
+    'number',
+    positionX,
+    randomInteger(
+      1,
+      15
+    )
+  );
+
+  scheduleNextFake();
+}
+
+  function createBall(
+    kind,
+    positionX,
+    number
+  ){
+
+    balls.push({
+
+      kind:kind,
+
+      x:positionX,
+      y:CFG.ballStartY,
+
+      radius:
+        CFG.ballRadius,
+
+      number:
+        number || 0,
+
+/*
+ *キ*ーボールもナンバーボールも
+  完全に同じ速度で落下する。
+*/
+speed:
+ CFG.fallSpeed,
+
+      surfaceAngle:
+        kind === 'number'
+          ? randomRange(
+              -Math.PI,
+              Math.PI
+            )
+          : 0,
+
+      latitude:
+        randomRange(
+          -0.48,
+          0.48
+        ),
+
+      spin:
+        randomRange(
+          CFG.ballSpinMin,
+          CFG.ballSpinMax
+        ) *
+        randomDirection(),
+
+      latitudeVelocity:
+        randomRange(
+          CFG.ballLatitudeSpeedMin,
+          CFG.ballLatitudeSpeedMax
+        ) *
+        randomDirection(),
+
+      shot:false,
+      hitX:0,
+      hitY:0,
+
+      impactSeed:
+        randomRange(
+          1,
+          10000
+        )
+    });
+  }
+
+  function calculateRoundScore(distanceRatio){
+
+    /*
+      中心は100点。
+
+      ボールの外周へ近づくほど
+      0点へ近づく。
+    */
+    const accuracy =
+      clamp(
+        1 -
+        distanceRatio,
+        0,
+        1
+      );
+
+    return Math.round(
+      CFG.maximumRoundScore *
+      Math.pow(
+        accuracy,
+        CFG.scoreCurvePower
+      )
+    );
+  }
+
+  function getFinalRank(){
+
+    if(
+      totalScore >=
+      CFG.finalRankS
+    ){
+      return 'S';
+    }
+
+    if(
+      totalScore >=
+      CFG.finalRankA
+    ){
+      return 'A';
+    }
+
+    if(
+      totalScore >=
+      CFG.finalRankB
+    ){
+      return 'B';
+    }
+
+    if(
+      totalScore >=
+      CFG.finalRankC
+    ){
+      return 'C';
+    }
+
+    if(
+      totalScore >=
+      CFG.finalRankD
+    ){
+      return 'D';
+    }
+
+    if(
+      totalScore >=
+      CFG.finalRankE
+    ){
+      return 'E';
+    }
+
+    return 'F';
+  }
+
+  function shoot(){
+
+    if(
+      mode !== 'play' ||
+      shotUsed
+    ){
+      return;
+    }
+
+    shotUsed = true;
+    spaceReady = false;
+
+    shotTime = 0;
+    screenFlash = 1;
+    recoil = 1;
+
+    let hitBall = null;
+    let nearestDistance = Infinity;
+
+    for(const ball of balls){
+
+      const deltaX =
+        CFG.aimX -
+        ball.x;
+
+      const deltaY =
+        CFG.aimY -
+        ball.y;
+
+      const distance =
+        Math.hypot(
+          deltaX,
+          deltaY
+        );
+
+      if(
+        distance <=
+        ball.radius &&
+        distance <
+        nearestDistance
+      ){
+
+        hitBall = ball;
+        nearestDistance = distance;
+      }
+    }
+
+    if(hitBall){
+
+      shotLocalX =
+        (
+          CFG.aimX -
+          hitBall.x
+        ) /
+        hitBall.radius;
+
+      shotLocalY =
+        (
+          CFG.aimY -
+          hitBall.y
+        ) /
+        hitBall.radius;
+
+      hitBall.shot = true;
+      hitBall.hitX = shotLocalX;
+      hitBall.hitY = shotLocalY;
+
+      resultImpactSeed =
+        hitBall.impactSeed;
+
+      if(
+        hitBall.kind ===
+        'cue'
+      ){
+
+        shotKind = 'cue';
+
+        shotDistanceRatio =
+          Math.hypot(
+            shotLocalX,
+            shotLocalY
+          );
+
+        roundScore =
+          calculateRoundScore(
+            shotDistanceRatio
+          );
+
+      }else{
+
+        shotKind = 'number';
+        resultNumber = hitBall.number;
+        roundScore = 0;
+      }
+
+    }else{
+
+      shotKind = 'empty';
+      roundScore = 0;
+    }
+
+    totalScore += roundScore;
+
+    createShotSparks();
+
+    mode = 'shotFreeze';
+  }
+
+  function createShotSparks(){
+
+    for(
+      let i = 0;
+      i < CFG.shotSparkCount;
+      i++
+    ){
+
+      const angle =
+        randomRange(
+          0,
+          TAU
+        );
+
+      const speed =
+        randomRange(
+          100,
+          320
+        );
+
+      sparks.push({
+
+        x:CFG.aimX,
+        y:CFG.aimY,
+
+        velocityX:
+          Math.cos(
+            angle
+          ) *
+          speed,
+
+        velocityY:
+          Math.sin(
+            angle
+          ) *
+          speed,
+
+        life:
+          randomRange(
+            0.12,
+            0.30
+          ),
+
+        maximumLife:0.30,
+
+        size:
+          randomRange(
+            2,
+            5
+          )
+      });
+    }
+  }
+
+  function beginResult(){
+
+    transitionTime = 0;
+    mode = 'fadeOut';
+  }
+
+  function updateEffects(deltaTime){
+
+    screenFlash =
+      Math.max(
+        0,
+        screenFlash -
+        deltaTime /
+        CFG.shotFlashSeconds
+      );
+
+    recoil =
+      Math.max(
+        0,
+        recoil -
+        deltaTime * 8
+      );
+
+    for(
+      let i = sparks.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const spark = sparks[i];
+
+      spark.life -= deltaTime;
+
+      if(
+        spark.life <= 0
+      ){
+
+        sparks.splice(
+          i,
+          1
+        );
+
+        continue;
+      }
+
+      spark.x +=
+        spark.velocityX *
+        deltaTime;
+
+      spark.y +=
+        spark.velocityY *
+        deltaTime;
+
+      spark.velocityX *=
+        Math.pow(
+          0.03,
+          deltaTime
+        );
+
+      spark.velocityY *=
+        Math.pow(
+          0.03,
+          deltaTime
+        );
+    }
+  }
+
+  function updateBallRotation(
+    ball,
+    deltaTime,
+    multiplier
+  ){
+
+    if(
+      ball.kind !==
+      'number'
+    ){
+      return;
+    }
+
+    ball.surfaceAngle +=
+      ball.spin *
+      deltaTime *
+      multiplier;
+
+    ball.surfaceAngle =
+      normalizeAngle(
+        ball.surfaceAngle
+      );
+
+    ball.latitude +=
+      ball.latitudeVelocity *
+      deltaTime *
+      multiplier;
+
+    if(
+      ball.latitude > 0.64
+    ){
+
+      ball.latitude = 0.64;
+      ball.latitudeVelocity *= -1;
+    }
+
+    if(
+      ball.latitude < -0.64
+    ){
+
+      ball.latitude = -0.64;
+      ball.latitudeVelocity *= -1;
+    }
+  }
+
+  function update(deltaTime){
+
+    updateEffects(
+      deltaTime
+    );
+
+    if(
+      mode === 'play'
+    ){
+
+      elapsedTime += deltaTime;
+
+      /*
+        ナンバーボールはラウンド中ずっと生成する。
+
+        キューボールが出現しても停止しない。
+      */
+      if(
+        elapsedTime >=
+        nextFakeSpawnTime
+      ){
+
+        spawnFakeBall();
+      }
+
+      /*
+        キューボールをランダムな時刻で出す。
+      */
+      if(
+        !cueSpawned &&
+        elapsedTime >=
+        cueSpawnTime
+      ){
+
+        cueSpawned = true;
+
+        createBall(
+          'cue',
+          CFG.aimX,
+          0
+        );
+      }
+
+      for(const ball of balls){
+
+        ball.y +=
+          ball.speed *
+          deltaTime;
+
+        updateBallRotation(
+          ball,
+          deltaTime,
+          1
+        );
+      }
+
+      balls =
+        balls.filter(
+          function(ball){
+
+            if(
+              ball.y -
+              ball.radius >
+              CFG.ballRemoveY
+            ){
+
+              if(
+                ball.kind ===
+                'cue'
+              ){
+
+                cueEscaped = true;
+              }
+
+              return false;
+            }
+
+            return true;
+          }
+        );
+
+      /*
+        キューボールを見逃した場合。
+      */
+      if(
+        cueEscaped &&
+        !shotUsed
+      ){
+
+        shotUsed = true;
+        shotKind = 'missed';
+        roundScore = 0;
+
+        beginResult();
+      }
+
+    }else if(
+      mode ===
+      'shotFreeze'
+    ){
+
+      shotTime += deltaTime;
+
+      for(const ball of balls){
+
+        updateBallRotation(
+          ball,
+          deltaTime,
+          0.18
+        );
+      }
+
+      if(
+        shotTime >=
+        CFG.shotFreezeSeconds
+      ){
+
+        beginResult();
+      }
+
+    }else if(
+      mode ===
+      'fadeOut'
+    ){
+
+      transitionTime += deltaTime;
+
+      if(
+        transitionTime >=
+        CFG.fadeOutSeconds
+      ){
+
+        transitionTime = 0;
+        mode = 'blackHold';
+      }
+
+    }else if(
+      mode ===
+      'blackHold'
+    ){
+
+      transitionTime += deltaTime;
+
+      if(
+        transitionTime >=
+        CFG.blackHoldSeconds
+      ){
+
+        transitionTime = 0;
+        resultTime = 0;
+
+        mode = 'resultFadeIn';
+      }
+
+    }else if(
+      mode ===
+      'resultFadeIn'
+    ){
+
+      transitionTime += deltaTime;
+      resultTime += deltaTime;
+
+      if(
+        transitionTime >=
+        CFG.fadeInSeconds
+      ){
+
+        transitionTime = 0;
+        spaceReady = false;
+
+        mode = 'result';
+      }
+
+    }else if(
+      mode === 'result'
+    ){
+
+      resultTime += deltaTime;
+    }
+  }
+
+  function getBallColor(number){
+
+    /*
+      全ナンバーボールを単色にする。
+    */
+    const colors = [
+      '#f1c232',
+      '#3c83d5',
+      '#e34c43',
+      '#834eb2',
+      '#ed782e',
+      '#3b9a62',
+      '#8b3038',
+      '#34373b'
+    ];
+
+    return (
+      colors[
+        (
+          number - 1
+        ) %
+        colors.length
+      ]
+    );
+  }
+
+  function drawBallShadow(radius){
+
+    ctx.save();
+
+    ctx.translate(
+      0,
+      radius * 1.12
+    );
+
+    ctx.scale(
+      1,
+      0.24
+    );
+
+    const shadow =
+      ctx.createRadialGradient(
+        0,
+        0,
+        1,
+        0,
+        0,
+        radius * 1.1
+      );
+
+    shadow.addColorStop(
+      0,
+      'rgba(0,0,0,.38)'
+    );
+
+    shadow.addColorStop(
+      1,
+      'rgba(0,0,0,0)'
+    );
+
+    ctx.fillStyle = shadow;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      radius * 1.1,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  /*
+    ナンバーボールの番号面。
+
+    白丸と数字は同じ球面変形を受ける。
+  */
+  function drawNumberPatch(ball){
+
+    const radius = ball.radius;
+
+    const longitude =
+      normalizeAngle(
+        ball.surfaceAngle
+      );
+
+    const frontAmount =
+      Math.cos(
+        longitude
+      );
+
+    /*
+      裏側では描かない。
+    */
+    if(frontAmount <= 0){
+      return;
+    }
+
+    const latitude =
+      clamp(
+        ball.latitude,
+        -0.64,
+        0.64
+      );
+
+    const patchX =
+      Math.sin(
+        longitude
+      ) *
+      Math.cos(
+        latitude
+      ) *
+      radius *
+      0.78;
+
+    const patchY =
+      Math.sin(
+        latitude
+      ) *
+      radius *
+      0.74;
+
+    const horizontalScale =
+      Math.max(
+        0.025,
+        frontAmount
+      );
+
+    const verticalScale =
+      Math.max(
+        0.46,
+        Math.cos(
+          latitude
+        )
+      );
+
+    const patchRadius =
+      radius *
+      0.34 *
+      (
+        0.74 +
+        frontAmount * 0.26
+      );
+
+    ctx.save();
+
+    ctx.translate(
+      patchX,
+      patchY
+    );
+
+    ctx.rotate(
+      -Math.sin(
+        longitude
+      ) *
+      latitude *
+      0.30
+    );
+
+    ctx.scale(
+      horizontalScale,
+      verticalScale
+    );
+
+    ctx.globalAlpha *=
+      0.55 +
+      frontAmount * 0.45;
+
+    const patchGradient =
+      ctx.createRadialGradient(
+        -patchRadius * 0.27,
+        -patchRadius * 0.30,
+        patchRadius * 0.05,
+
+        0,
+        0,
+        patchRadius
+      );
+
+    patchGradient.addColorStop(
+      0,
+      '#ffffff'
+    );
+
+    patchGradient.addColorStop(
+      0.68,
+      '#f7f3e3'
+    );
+
+    patchGradient.addColorStop(
+      1,
+      '#cbc6b4'
+    );
+
+    ctx.fillStyle =
+      patchGradient;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      patchRadius,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      'rgba(20,18,15,.55)';
+
+    ctx.lineWidth =
+      Math.min(
+        12,
+        2 /
+        Math.max(
+          horizontalScale,
+          0.15
+        )
+      );
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#111111';
+
+    ctx.font =
+      '900 ' +
+      Math.round(
+        radius * 0.34
+      ) +
+      'px Arial';
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+    ctx.fillText(
+      String(
+        ball.number
+      ),
+      0,
+      radius * 0.015
+    );
+
+    ctx.restore();
+  }
+
+  /*
+    リアル寄りの弾痕。
+
+    大きな焦げ跡にはせず、
+    小さな穿孔、欠けた縁、短い亀裂、
+    穴の内壁を描く。
+  */
+  function drawBulletHole(ball){
+
+    if(!ball.shot){
+      return;
+    }
+
+    const radius = ball.radius;
+
+    const scaleRatio =
+      radius /
+      CFG.ballRadius;
+
+    const hitX =
+      ball.hitX *
+      radius;
+
+    const hitY =
+      ball.hitY *
+      radius;
+
+    const holeRadius =
+      CFG.bulletHoleRadius *
+      scaleRatio;
+
+    const rimRadius =
+      CFG.bulletRimRadius *
+      scaleRatio;
+
+    const residueRadius =
+      CFG.bulletResidueRadius *
+      scaleRatio;
+
+    const seed =
+      ball.impactSeed || 1;
+
+    ctx.save();
+
+    /*
+      ボールの外へ描画しない。
+    */
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      radius - 1,
+      0,
+      TAU
+    );
+
+    ctx.clip();
+
+    /*
+      ごく薄い粉状の接触跡。
+    */
+    const residue =
+      ctx.createRadialGradient(
+        hitX,
+        hitY,
+        rimRadius * 0.5,
+
+        hitX,
+        hitY,
+        residueRadius
+      );
+
+    residue.addColorStop(
+      0,
+      'rgba(74,68,57,.34)'
+    );
+
+    residue.addColorStop(
+      0.55,
+      'rgba(110,100,82,.12)'
+    );
+
+    residue.addColorStop(
+      1,
+      'rgba(110,100,82,0)'
+    );
+
+    ctx.fillStyle = residue;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      hitX,
+      hitY,
+      residueRadius,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    /*
+      短い放射状の亀裂。
+    */
+    const crackCount =
+      CFG.bulletCrackMinimumCount +
+      Math.floor(
+        seededRandom(
+          seed + 7.31
+        ) *
+        (
+          CFG.bulletCrackMaximumCount -
+          CFG.bulletCrackMinimumCount +
+          1
+        )
+      );
+
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    for(
+      let i = 0;
+      i < crackCount;
+      i++
+    ){
+
+      const angle =
+        (
+          i /
+          crackCount
+        ) *
+        TAU +
+        seededRandom(
+          seed +
+          i * 11.43
+        ) *
+        1.05;
+
+      const crackLength =
+        (
+          CFG.bulletCrackMinimumLength +
+          seededRandom(
+            seed +
+            i * 17.19
+          ) *
+          (
+            CFG.bulletCrackMaximumLength -
+            CFG.bulletCrackMinimumLength
+          )
+        ) *
+        scaleRatio;
+
+      const bend =
+        (
+          seededRandom(
+            seed +
+            i * 23.77
+          ) -
+          0.5
+        ) *
+        2.1 *
+        scaleRatio;
+
+      const startDistance =
+        rimRadius * 0.72;
+
+      const middleDistance =
+        crackLength * 0.58;
+
+      const startX =
+        hitX +
+        Math.cos(
+          angle
+        ) *
+        startDistance;
+
+      const startY =
+        hitY +
+        Math.sin(
+          angle
+        ) *
+        startDistance;
+
+      const middleX =
+        hitX +
+        Math.cos(
+          angle
+        ) *
+        middleDistance +
+        Math.cos(
+          angle +
+          Math.PI / 2
+        ) *
+        bend;
+
+      const middleY =
+        hitY +
+        Math.sin(
+          angle
+        ) *
+        middleDistance +
+        Math.sin(
+          angle +
+          Math.PI / 2
+        ) *
+        bend;
+
+      const endX =
+        hitX +
+        Math.cos(
+          angle
+        ) *
+        crackLength;
+
+      const endY =
+        hitY +
+        Math.sin(
+          angle
+        ) *
+        crackLength;
+
+      ctx.strokeStyle =
+        'rgba(52,47,39,.68)';
+
+      ctx.lineWidth =
+        Math.max(
+          0.55,
+          0.72 * scaleRatio
+        );
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        startX,
+        startY
+      );
+
+      ctx.lineTo(
+        middleX,
+        middleY
+      );
+
+      ctx.lineTo(
+        endX,
+        endY
+      );
+
+      ctx.stroke();
+
+      /*
+        亀裂の片側のハイライト。
+      */
+      ctx.strokeStyle =
+        'rgba(255,252,235,.22)';
+
+      ctx.lineWidth =
+        Math.max(
+          0.30,
+          0.34 * scaleRatio
+        );
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        startX - 0.45,
+        startY - 0.45
+      );
+
+      ctx.lineTo(
+        middleX - 0.45,
+        middleY - 0.45
+      );
+
+      ctx.lineTo(
+        endX - 0.45,
+        endY - 0.45
+      );
+
+      ctx.stroke();
+    }
+
+    /*
+      欠けた外縁。
+
+      規則的な円ではなく、
+      小さな不均一形状にする。
+    */
+    const rimPointCount = 14;
+
+    ctx.fillStyle =
+      '#b8b19f';
+
+    ctx.beginPath();
+
+    for(
+      let i = 0;
+      i < rimPointCount;
+      i++
+    ){
+
+      const angle =
+        (
+          i /
+          rimPointCount
+        ) *
+        TAU;
+
+      const unevenRadius =
+        rimRadius *
+        (
+          0.80 +
+          seededRandom(
+            seed +
+            i * 5.93
+          ) *
+          0.38
+        );
+
+      const pointX =
+        hitX +
+        Math.cos(
+          angle
+        ) *
+        unevenRadius;
+
+      const pointY =
+        hitY +
+        Math.sin(
+          angle
+        ) *
+        unevenRadius;
+
+      if(i === 0){
+
+        ctx.moveTo(
+          pointX,
+          pointY
+        );
+
+      }else{
+
+        ctx.lineTo(
+          pointX,
+          pointY
+        );
+      }
+    }
+
+    ctx.closePath();
+    ctx.fill();
+
+    /*
+      欠けた縁の陰影。
+    */
+    const rimShade =
+      ctx.createRadialGradient(
+        hitX -
+        holeRadius * 0.32,
+        hitY -
+        holeRadius * 0.32,
+        holeRadius * 0.10,
+
+        hitX,
+        hitY,
+        rimRadius
+      );
+
+    rimShade.addColorStop(
+      0,
+      '#030303'
+    );
+
+    rimShade.addColorStop(
+      0.46,
+      '#0d0c0b'
+    );
+
+    rimShade.addColorStop(
+      0.72,
+      '#3a362f'
+    );
+
+    rimShade.addColorStop(
+      1,
+      'rgba(122,114,97,.70)'
+    );
+
+    ctx.fillStyle = rimShade;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      hitX,
+      hitY,
+      rimRadius * 0.76,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    /*
+      穿孔の内部。
+    */
+    const hole =
+      ctx.createRadialGradient(
+        hitX -
+        holeRadius * 0.26,
+        hitY -
+        holeRadius * 0.23,
+        holeRadius * 0.05,
+
+        hitX,
+        hitY,
+        holeRadius
+      );
+
+    hole.addColorStop(
+      0,
+      '#000000'
+    );
+
+    hole.addColorStop(
+      0.58,
+      '#030303'
+    );
+
+    hole.addColorStop(
+      1,
+      '#171512'
+    );
+
+    ctx.fillStyle = hole;
+
+    ctx.beginPath();
+
+    ctx.ellipse(
+      hitX,
+      hitY,
+      holeRadius,
+      holeRadius * 0.88,
+      -0.17,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    /*
+      穴の下側に見える内壁。
+    */
+    ctx.strokeStyle =
+      'rgba(195,185,158,.46)';
+
+    ctx.lineWidth =
+      Math.max(
+        0.65,
+        0.82 * scaleRatio
+      );
+
+    ctx.beginPath();
+
+    ctx.arc(
+      hitX,
+      hitY,
+      holeRadius * 1.08,
+      0.16,
+      Math.PI * 0.86
+    );
+
+    ctx.stroke();
+
+    /*
+      穴の上側の暗い縁。
+    */
+    ctx.strokeStyle =
+      'rgba(0,0,0,.88)';
+
+    ctx.lineWidth =
+      Math.max(
+        0.62,
+        0.78 * scaleRatio
+      );
+
+    ctx.beginPath();
+
+    ctx.arc(
+      hitX,
+      hitY,
+      holeRadius * 1.06,
+      Math.PI * 1.02,
+      TAU - 0.12
+    );
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawBall(ball,alpha){
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      alpha === undefined
+        ? 1
+        : alpha;
+
+    ctx.translate(
+      ball.x,
+      ball.y
+    );
+
+    const radius = ball.radius;
+
+    drawBallShadow(
+      radius
+    );
+
+    const mainColor =
+      ball.kind === 'cue'
+        ? '#f4f1e1'
+        : getBallColor(
+            ball.number
+          );
+
+    const sphere =
+      ctx.createRadialGradient(
+        -radius * 0.36,
+        -radius * 0.40,
+        radius * 0.05,
+
+        radius * 0.08,
+        radius * 0.10,
+        radius * 1.02
+      );
+
+    sphere.addColorStop(
+      0,
+      '#ffffff'
+    );
+
+    sphere.addColorStop(
+      0.20,
+      ball.kind === 'cue'
+        ? '#fffdf4'
+        : mainColor
+    );
+
+    sphere.addColorStop(
+      0.66,
+      ball.kind === 'cue'
+        ? '#ddd9c8'
+        : mainColor
+    );
+
+    sphere.addColorStop(
+      1,
+      ball.kind === 'cue'
+        ? '#74736a'
+        : '#1b1b1b'
+    );
+
+    ctx.fillStyle = sphere;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      radius,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    if(
+      ball.kind ===
+      'number'
+    ){
+
+      drawNumberPatch(
+        ball
+      );
+    }
+
+    ctx.strokeStyle =
+      'rgba(8,8,8,.58)';
+
+    ctx.lineWidth =
+      Math.max(
+        2,
+        radius * 0.025
+      );
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      radius,
+      0,
+      TAU
+    );
+
+    ctx.stroke();
+
+    /*
+      表面反射。
+    */
+    const shine =
+      ctx.createRadialGradient(
+        -radius * 0.42,
+        -radius * 0.46,
+        1,
+
+        -radius * 0.42,
+        -radius * 0.46,
+        radius * 0.42
+      );
+
+    shine.addColorStop(
+      0,
+      'rgba(255,255,255,.78)'
+    );
+
+    shine.addColorStop(
+      0.34,
+      'rgba(255,255,255,.30)'
+    );
+
+    shine.addColorStop(
+      1,
+      'rgba(255,255,255,0)'
+    );
+
+    ctx.fillStyle = shine;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      radius,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    drawBulletHole(
+      ball
+    );
+
+    ctx.restore();
+  }
+
+  /*
+    明るいプレイ背景。
+  */
+
+function drawBackground(){
+
+  /*
+    プレイ画面は全ラウンド共通の緑背景。
+    最終リザルトの赤背景は
+    drawResultBackground()側だけで処理する。
+  */
+  const background =
+    ctx.createLinearGradient(
+      0,
+      0,
+      0,
+      H
+    );
+
+  background.addColorStop(
+    0,
+    '#4fa88b'
+  );
+
+  background.addColorStop(
+    0.48,
+    '#42957a'
+  );
+
+  background.addColorStop(
+    1,
+    '#286c59'
+  );
+
+  ctx.fillStyle =
+    background;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  /*
+    中央の照明。
+  */
+  const centerGlow =
+    ctx.createRadialGradient(
+      W / 2,
+      320,
+      30,
+
+      W / 2,
+      320,
+      470
+    );
+
+  centerGlow.addColorStop(
+    0,
+    'rgba(230,255,244,.36)'
+  );
+
+  centerGlow.addColorStop(
+    0.52,
+    'rgba(150,245,205,.12)'
+  );
+
+  centerGlow.addColorStop(
+    1,
+    'rgba(0,0,0,0)'
+  );
+
+  ctx.fillStyle =
+    centerGlow;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+}
+
+  function drawCrosshair(){
+
+    ctx.save();
+
+    ctx.translate(
+      CFG.aimX,
+      CFG.aimY +
+      recoil * 4
+    );
+
+    ctx.strokeStyle =
+      shotUsed
+        ? 'rgba(230,240,235,.36)'
+        : 'rgba(255,65,52,.98)';
+
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      CFG.crosshairRadius,
+      0,
+      TAU
+    );
+
+    ctx.moveTo(-50,0);
+    ctx.lineTo(-14,0);
+
+    ctx.moveTo(14,0);
+    ctx.lineTo(50,0);
+
+    ctx.moveTo(0,-50);
+    ctx.lineTo(0,-14);
+
+    ctx.moveTo(0,14);
+    ctx.lineTo(0,50);
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      'rgba(255,65,52,.98)';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      2.5,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawShotEffects(){
+
+    for(const spark of sparks){
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        clamp(
+          spark.life /
+          spark.maximumLife,
+          0,
+          1
+        );
+
+      ctx.fillStyle =
+        '#fff3bd';
+
+      ctx.shadowColor =
+        '#ffb23c';
+
+      ctx.shadowBlur = 10;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        spark.x,
+        spark.y,
+        spark.size,
+        0,
+        TAU
+      );
+
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    if(
+      screenFlash > 0
+    ){
+
+      ctx.fillStyle =
+        'rgba(255,255,255,' +
+        screenFlash * 0.58 +
+        ')';
+
+      ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+      );
+    }
+  }
+
+  function drawPlayHUD(){
+
+    /*
+      射撃状態。
+    */
+    ctx.fillStyle =
+      'rgba(15,67,54,.72)';
+
+    ctx.fillRect(
+      18,
+      18,
+      155,
+      44
+    );
+
+    ctx.strokeStyle =
+      'rgba(230,255,245,.45)';
+
+    ctx.lineWidth = 1;
+
+    ctx.strokeRect(
+      18.5,
+      18.5,
+      155,
+      44
+    );
+
+    ctx.fillStyle =
+      shotUsed
+        ? '#b8c5c0'
+        : '#ffffff';
+
+    ctx.font =
+      '700 17px sans-serif';
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+    ctx.fillText(
+      shotUsed
+        ? 'SHOT USED'
+        : 'SPACE : SHOOT',
+      95,
+      40
+    );
+
+    /*
+      ラウンド表示。
+    */
+    ctx.fillStyle =
+      'rgba(15,67,54,.72)';
+
+    ctx.fillRect(
+      W - 157,
+      18,
+      139,
+      44
+    );
+
+    ctx.strokeStyle =
+      'rgba(230,255,245,.45)';
+
+    ctx.strokeRect(
+      W - 156.5,
+      18.5,
+      138,
+      44
+    );
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '700 16px sans-serif';
+
+    ctx.fillText(
+      'ROUND ' +
+      currentRound +
+      ' / ' +
+      CFG.totalRounds,
+      W - 87,
+      40
+    );
+  }
+
+  function drawPlay(){
+
+    drawBackground();
+
+    for(const ball of balls){
+
+      drawBall(
+        ball
+      );
+    }
+
+    drawCrosshair();
+    drawShotEffects();
+    drawPlayHUD();
+
+    if(CFG.debug){
+
+      ctx.fillStyle =
+        '#ffffff';
+
+      ctx.font =
+        '12px monospace';
+
+      ctx.textAlign =
+        'right';
+
+      ctx.textBaseline =
+        'top';
+
+      ctx.fillText(
+        'CUE ' +
+        cueSpawnTime.toFixed(
+          2
+        ) +
+        's',
+        W - 18,
+        74
+      );
+
+      ctx.fillText(
+        'TIME ' +
+        elapsedTime.toFixed(
+          2
+        ),
+        W - 18,
+        92
+      );
+
+      ctx.fillText(
+        'FAKE ' +
+        nextFakeSpawnTime.toFixed(
+          2
+        ),
+        W - 18,
+        110
+      );
+    }
+  }
+
+  function drawTitle(){
+
+    const background =
+      ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        H
+      );
+
+    background.addColorStop(
+      0,
+      '#effbf6'
+    );
+
+    background.addColorStop(
+      1,
+      '#9bd2bc'
+    );
+
+    ctx.fillStyle = background;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.fillStyle =
+      '#17604d';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      118
+    );
+
+    ctx.fillStyle =
+      '#e7bd4d';
+
+    ctx.fillRect(
+      0,
+      112,
+      W,
+      6
+    );
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+ctx.fillStyle =
+  '#ffffff';
+
+ctx.font =
+  '900 54px sans-serif';
+
+ctx.fillText(
+  'SHOOT',
+  W / 2,
+  47
+);
+
+ctx.fillStyle =
+  '#ffdd67';
+
+ctx.font =
+  '900 48px sans-serif';
+
+ctx.fillText(
+  'THE CUE BALL',
+  W / 2,
+  94
+);
+
+    const demoBall = {
+
+      kind:'cue',
+
+      x:W / 2,
+      y:322,
+
+      radius:122,
+
+      number:0,
+
+      surfaceAngle:0,
+      latitude:0,
+
+      shot:false,
+
+      hitX:0,
+      hitY:0,
+
+      impactSeed:1
+    };
+
+    drawBall(
+      demoBall
+    );
+
+/*
+  説明パネル。
+*/
+ctx.fillStyle =
+  'rgba(255,255,255,.92)';
+
+ctx.fillRect(
+  66,
+  482,
+  W - 132,
+  172
+);
+
+ctx.strokeStyle =
+  '#17604d';
+
+ctx.lineWidth = 3;
+
+ctx.strokeRect(
+  66.5,
+  482.5,
+  W - 132,
+  172
+);
+
+/*
+  1行目。
+*/
+ctx.fillStyle =
+  '#164638';
+
+ctx.font =
+  '700 22px sans-serif';
+
+ctx.fillText(
+  'キューボールの中心を撃て',
+  W / 2,
+  519
+);
+
+/*
+  2行目以降。
+
+  ベースラインを約34px間隔で揃える。
+*/
+ctx.fillStyle =
+  '#426b5d';
+
+ctx.font =
+  '600 17px sans-serif';
+
+ctx.fillText(
+  '真っ白いキューボール以外は撃つな',
+  W / 2,
+  558
+);
+
+ctx.fillText(
+  '全3ラウンド',
+  W / 2,
+  594
+);
+
+ctx.fillText(
+  '各ラウンドで撃てるのは一発だけ',
+  W / 2,
+  630
+);
+
+    ctx.fillStyle =
+      '#b83930';
+
+    ctx.fillRect(
+      128,
+      674,
+      W - 256,
+      70
+    );
+
+    ctx.strokeStyle =
+      '#f5d472';
+
+    ctx.lineWidth = 3;
+
+    ctx.strokeRect(
+      128.5,
+      674.5,
+      W - 256,
+      70
+    );
+
+    ctx.fillStyle =
+      '#fff7df';
+
+    ctx.font =
+      '900 25px sans-serif';
+
+    ctx.fillText(
+      'SPACE で開始',
+      W / 2,
+      710
+    );
+  }
+
+function getRankColor(rank){
+
+  const colors = {
+
+    F:'#69D9FF', // 水色
+    E:'#9BE04B', // 黄緑
+    D:'#FFD84A', // 黄色
+    C:'#FF982F', // オレンジ
+    B:'#FF4242', // 赤
+    A:'#FF69B4', // ピンク
+    S:'#FF6F78'  // ピンクとオレンジの中間
+  };
+
+  return colors[rank];
+}
+
+
+function drawResultBackground(){
+
+  /*
+    最終ラウンドだけ赤系の背景にする。
+
+    この変数は、この関数の中で定義して
+    この関数の中だけで使用する。
+  */
+  const isFinalResult =
+    currentRound ===
+    CFG.totalRounds;
+
+  const background =
+    ctx.createLinearGradient(
+      0,
+      0,
+      0,
+      H
+    );
+
+  if(isFinalResult){
+
+    background.addColorStop(
+      0,
+      '#b84b4b'
+    );
+
+    background.addColorStop(
+      0.55,
+      '#87333b'
+    );
+
+    background.addColorStop(
+      1,
+      '#4b1e27'
+    );
+
+  }else{
+
+    background.addColorStop(
+      0,
+      '#4e9c84'
+    );
+
+    background.addColorStop(
+      0.55,
+      '#3b816b'
+    );
+
+    background.addColorStop(
+      1,
+      '#28604f'
+    );
+  }
+
+  ctx.fillStyle =
+    background;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  /*
+    中央の照明。
+
+    最終リザルトでは暖色系、
+    1、2ラウンド目では緑系にする。
+  */
+  const glow =
+    ctx.createRadialGradient(
+      W / 2,
+      240,
+      20,
+
+      W / 2,
+      240,
+      440
+    );
+
+  if(isFinalResult){
+
+    glow.addColorStop(
+      0,
+      'rgba(255,220,205,.28)'
+    );
+
+    glow.addColorStop(
+      1,
+      'rgba(0,0,0,0)'
+    );
+
+  }else{
+
+    glow.addColorStop(
+      0,
+      'rgba(230,255,245,.31)'
+    );
+
+    glow.addColorStop(
+      1,
+      'rgba(0,0,0,0)'
+    );
+  }
+
+  ctx.fillStyle =
+    glow;
+
+  ctx.fillRect(
+    0,
+    0,
+    W,
+    H
+  );
+
+  /*
+    下側の床。
+
+    最終リザルトでは赤系、
+    それ以外では緑系。
+  */
+  ctx.fillStyle =
+    isFinalResult
+      ? '#632933'
+      : '#34725f';
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    0,
+    430
+  );
+
+  ctx.lineTo(
+    W,
+    390
+  );
+
+  ctx.lineTo(
+    W,
+    H
+  );
+
+  ctx.lineTo(
+    0,
+    H
+  );
+
+  ctx.closePath();
+
+  ctx.fill();
+}
+
+  function drawResultBall(){
+
+    const progress =
+      clamp(
+        (
+          resultTime -
+          CFG.resultRevealDelay
+        ) /
+        0.30,
+        0,
+        1
+      );
+
+    const easedProgress =
+      easeOutCubic(
+        progress
+      );
+
+    const resultBall = {
+
+      kind:
+        shotKind === 'number'
+          ? 'number'
+          : 'cue',
+
+      number:
+        shotKind === 'number'
+          ? resultNumber
+          : 0,
+
+      x:W / 2,
+
+      y:
+        158 -
+        (
+          1 -
+          easedProgress
+        ) *
+        38,
+
+      radius:
+        CFG.resultBallRadius,
+
+      surfaceAngle:0,
+      latitude:0,
+
+      /*
+        キューボールへ命中したときだけ
+        弾痕を表示する。
+      */
+      shot:
+        shotKind === 'cue',
+
+      hitX:
+        shotLocalX,
+
+      hitY:
+        shotLocalY,
+
+      impactSeed:
+        resultImpactSeed
+    };
+
+    drawBall(
+      resultBall,
+      easedProgress
+    );
+  }
+
+  function drawPanel(
+    x,
+    y,
+    width,
+    height
+  ){
+
+    ctx.fillStyle =
+      'rgba(13,57,47,.76)';
+
+    ctx.fillRect(
+      x,
+      y,
+      width,
+      height
+    );
+
+    ctx.strokeStyle =
+      'rgba(232,255,247,.42)';
+
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+      x + 0.5,
+      y + 0.5,
+      width,
+      height
+    );
+  }
+
+  /*
+    1、2ラウンド目の閉じたパネル。
+
+    LOCKEDなどの文字は表示しない。
+    単純なグレーアウトだけにする。
+  */
+  function drawDisabledPanel(
+    x,
+    y,
+    width,
+    height
+  ){
+
+    const disabled =
+      ctx.createLinearGradient(
+        0,
+        y,
+        0,
+        y + height
+      );
+
+    disabled.addColorStop(
+      0,
+      '#929b98'
+    );
+
+    disabled.addColorStop(
+      0.50,
+      '#737d79'
+    );
+
+    disabled.addColorStop(
+      1,
+      '#5d6763'
+    );
+
+    ctx.fillStyle = disabled;
+
+    ctx.fillRect(
+      x,
+      y,
+      width,
+      height
+    );
+
+    /*
+      わずかな内側の陰影。
+    */
+    const innerShade =
+      ctx.createLinearGradient(
+        x,
+        0,
+        x + width,
+        0
+      );
+
+    innerShade.addColorStop(
+      0,
+      'rgba(0,0,0,.22)'
+    );
+
+    innerShade.addColorStop(
+      0.12,
+      'rgba(255,255,255,.04)'
+    );
+
+    innerShade.addColorStop(
+      0.88,
+      'rgba(255,255,255,.04)'
+    );
+
+    innerShade.addColorStop(
+      1,
+      'rgba(0,0,0,.22)'
+    );
+
+    ctx.fillStyle = innerShade;
+
+    ctx.fillRect(
+      x,
+      y,
+      width,
+      height
+    );
+
+    ctx.strokeStyle =
+      'rgba(235,245,241,.24)';
+
+    ctx.lineWidth = 2;
+
+    ctx.strokeRect(
+      x + 0.5,
+      y + 0.5,
+      width,
+      height
+    );
+  }
+
+  /*
+    全ラウンド共通の結果画面。
+
+    ラウンド1、2では、
+    TOTAL SCOREとRANKをグレーアウトする。
+
+    ラウンド3では、
+    同じ場所が開いて内容を表示する。
+  */
+  function drawResult(){
+
+    drawResultBackground();
+    drawResultBall();
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+    /*
+      ラウンド数。
+    */
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '900 25px sans-serif';
+
+    ctx.fillText(
+      'ROUND ' +
+      currentRound +
+      ' / ' +
+      CFG.totalRounds,
+      W / 2,
+      38
+    );
+
+    /*
+      今回のスコア。
+    */
+    drawPanel(
+      55,
+      278,
+      490,
+      116
+    );
+
+    ctx.fillStyle =
+      '#e5f1ed';
+
+    ctx.font =
+      '800 19px sans-serif';
+
+    ctx.fillText(
+      'SCORE',
+      W / 2,
+      304
+    );
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.shadowColor =
+      roundScore ===
+      CFG.maximumRoundScore
+        ? '#ffd65b'
+        : 'rgba(255,255,255,.28)';
+
+    ctx.shadowBlur =
+      roundScore ===
+      CFG.maximumRoundScore
+        ? 18
+        : 5;
+
+    ctx.font =
+      '900 61px monospace';
+
+    ctx.fillText(
+      String(
+        roundScore
+      ),
+      W / 2,
+      353
+    );
+
+    ctx.shadowColor =
+      'transparent';
+
+    ctx.shadowBlur = 0;
+
+    /*
+      合計スコア。
+    */
+    if(
+      currentRound ===
+      CFG.totalRounds
+    ){
+
+      drawPanel(
+        55,
+        412,
+        490,
+        120
+      );
+
+      ctx.fillStyle =
+        '#e5f1ed';
+
+      ctx.font =
+        '800 19px sans-serif';
+
+      ctx.fillText(
+        'TOTAL SCORE',
+        W / 2,
+        438
+      );
+
+      ctx.fillStyle =
+        '#ffffff';
+
+      ctx.shadowColor =
+        totalScore ===
+        CFG.maximumRoundScore *
+        CFG.totalRounds
+          ? '#ffd65b'
+          : 'rgba(255,255,255,.20)';
+
+      ctx.shadowBlur =
+        totalScore ===
+        CFG.maximumRoundScore *
+        CFG.totalRounds
+          ? 18
+          : 4;
+
+      ctx.font =
+        '900 55px monospace';
+
+      ctx.fillText(
+        String(
+          totalScore
+        ),
+        W / 2,
+        484
+      );
+
+      ctx.shadowColor =
+        'transparent';
+
+      ctx.shadowBlur = 0;
+
+      ctx.fillStyle =
+        '#c5d3ce';
+
+      ctx.font =
+        '700 15px monospace';
+
+      ctx.fillText(
+        '/ ' +
+        (
+          CFG.maximumRoundScore *
+          CFG.totalRounds
+        ),
+        W / 2,
+        516
+      );
+
+    }else{
+
+      drawDisabledPanel(
+        55,
+        412,
+        490,
+        120
+      );
+    }
+
+/*
+  最終ランク。
+*/
+if(
+  currentRound ===
+  CFG.totalRounds
+){
+
+  const finalRank =
+    getFinalRank();
+
+  const rankColor =
+    getRankColor(
+      finalRank
+    );
+
+  drawPanel(
+    55,
+    550,
+    490,
+    154
+  );
+
+  ctx.fillStyle =
+    '#ffffff';
+
+  ctx.font =
+    '800 19px sans-serif';
+
+  ctx.fillText(
+    'RANK',
+    W / 2,
+    575
+  );
+
+  /*
+    上下移動はさせない。
+    同じ位置で横と縦に伸び縮みする。
+  */
+  const rankBounce =
+    Math.sin(
+      resultTime * 7.4
+    );
+
+  const rankSecondaryBounce =
+    Math.sin(
+      resultTime * 14.8
+    );
+
+  const rankScaleX =
+    1 +
+    rankBounce * 0.18 +
+    rankSecondaryBounce * 0.035;
+
+  const rankScaleY =
+    1 -
+    rankBounce * 0.22 +
+    rankSecondaryBounce * 0.025;
+
+  ctx.save();
+
+  ctx.translate(
+    W / 2,
+    645
+  );
+
+  ctx.scale(
+    rankScaleX,
+    rankScaleY
+  );
+
+  ctx.fillStyle =
+    rankColor;
+
+  ctx.shadowColor =
+    rankColor;
+
+  ctx.shadowBlur =
+    20 +
+    Math.max(
+      0,
+      rankBounce
+    ) * 8;
+
+  ctx.font =
+    '900 91px serif';
+
+  ctx.fillText(
+    finalRank,
+    0,
+    0
+  );
+
+  ctx.restore();
+
+  ctx.shadowColor =
+    'transparent';
+
+  ctx.shadowBlur = 0;
+
+}else{
+
+  drawDisabledPanel(
+    55,
+    550,
+    490,
+    154
+  );
+}
+
+    /*
+      次へ、またはもう一度。
+    */
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '700 18px sans-serif';
+
+    ctx.fillText(
+      currentRound <
+      CFG.totalRounds
+        ? 'SPACEで次へ'
+        : 'SPACEでタイトルに戻る',
+      W / 2,
+      760
+    );
+  }
+
+  function getTransitionOpacity(){
+
+    if(
+      mode === 'fadeOut'
+    ){
+
+      return clamp(
+        transitionTime /
+        CFG.fadeOutSeconds,
+        0,
+        1
+      );
+    }
+
+    if(
+      mode === 'blackHold'
+    ){
+
+      return 1;
+    }
+
+    if(
+      mode ===
+      'resultFadeIn'
+    ){
+
+      return (
+        1 -
+        clamp(
+          transitionTime /
+          CFG.fadeInSeconds,
+          0,
+          1
+        )
+      );
+    }
+
+    return 0;
+  }
+
+  function render(){
+
+    ctx.setTransform(
+      canvasScale,
+      0,
+      0,
+      canvasScale,
+      canvasOffsetX,
+      canvasOffsetY
+    );
+
+    ctx.clearRect(
+      -canvasOffsetX /
+      canvasScale,
+
+      -canvasOffsetY /
+      canvasScale,
+
+      canvas.width /
+      canvasScale,
+
+      canvas.height /
+      canvasScale
+    );
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.rect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.clip();
+
+    if(
+      mode === 'title'
+    ){
+
+      drawTitle();
+
+    }else if(
+      mode === 'result' ||
+      mode === 'resultFadeIn'
+    ){
+
+      drawResult();
+
+    }else{
+
+      drawPlay();
+    }
+
+    const opacity =
+      getTransitionOpacity();
+
+    if(opacity > 0){
+
+      ctx.fillStyle =
+        'rgba(0,0,0,' +
+        opacity +
+        ')';
+
+      ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+      );
+    }
+
+    ctx.restore();
+  }
+
+  function keyDown(event){
+
+    if(
+      event.code !== 'Space'
+    ){
+      return;
+    }
+
+    event.preventDefault();
+
+    if(event.repeat){
+      return;
+    }
+
+    if(
+      mode === 'title'
+    ){
+
+      startNewGame();
+
+      return;
+    }
+
+    if(
+      mode === 'play' &&
+      spaceReady
+    ){
+
+      shoot();
+
+      return;
+    }
+
+    if(
+      mode === 'result' &&
+      spaceReady
+    ){
+
+      if(
+        currentRound <
+        CFG.totalRounds
+      ){
+
+        currentRound++;
+
+        startRound();
+
+}else{
+
+  mode = 'title';
+  spaceReady = false;
+
+  balls = [];
+  sparks = [];
+}
+
+    }
+  }
+
+  function keyUp(event){
+
+    if(
+      event.code !== 'Space'
+    ){
+      return;
+    }
+
+    event.preventDefault();
+
+    spaceReady = true;
+  }
+
+  function resize(){
+
+    if(
+      !root ||
+      !canvas
+    ){
+      return;
+    }
+
+    const rect =
+      root.getBoundingClientRect();
+
+    const pixelRatio =
+      Math.min(
+        window.devicePixelRatio ||
+        1,
+        2
+      );
+
+    canvas.width =
+      Math.max(
+        1,
+        Math.round(
+          rect.width *
+          pixelRatio
+        )
+      );
+
+    canvas.height =
+      Math.max(
+        1,
+        Math.round(
+          rect.height *
+          pixelRatio
+        )
+      );
+
+    canvasScale =
+      Math.min(
+        canvas.width / W,
+        canvas.height / H
+      );
+
+    canvasOffsetX =
+      (
+        canvas.width -
+        W *
+        canvasScale
+      ) /
+      2;
+
+    canvasOffsetY =
+      (
+        canvas.height -
+        H *
+        canvasScale
+      ) /
+      2;
+  }
+
+  function gameLoop(timestamp){
+
+    if(destroyed){
+      return;
+    }
+
+    const deltaTime =
+      previousTime
+        ? Math.min(
+            0.033,
+            (
+              timestamp -
+              previousTime
+            ) /
+            1000
+          )
+        : 0;
+
+    previousTime =
+      timestamp;
+
+    update(
+      deltaTime
+    );
+
+    render();
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+  }
+
+  function focusGame(){
+
+    if(root){
+      root.focus();
+    }
+  }
+
+  function mount(target){
+
+    destroyed = false;
+    previousTime = 0;
+
+    root =
+      document.createElement(
+        'div'
+      );
+
+    root.className =
+      'stcb-root';
+
+    root.tabIndex = 0;
+
+    root.setAttribute(
+      'aria-label',
+      'SHOOT THE CUE BALL'
+    );
+
+    canvas =
+      document.createElement(
+        'canvas'
+      );
+
+    const focusHint =
+      document.createElement(
+        'div'
+      );
+
+    focusHint.className =
+      'stcb-focus';
+
+    focusHint.textContent =
+      '画面をクリックして操作';
+
+    root.appendChild(
+      canvas
+    );
+
+    root.appendChild(
+      focusHint
+    );
+
+    target.appendChild(
+      root
+    );
+
+    ctx =
+      canvas.getContext(
+        '2d'
+      );
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      focusGame
+    );
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+
+    setTimeout(
+      focusGame,
+      0
+    );
+  }
+
+  function destroy(){
+
+    if(destroyed){
+      return;
+    }
+
+    destroyed = true;
+
+    cancelAnimationFrame(
+      animationFrame
+    );
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+
+      root.removeEventListener(
+        'pointerdown',
+        focusGame
+      );
+
+      root.remove();
+    }
+
+    root = null;
+    canvas = null;
+    ctx = null;
+
+    balls = [];
+    sparks = [];
+  }
+
+  return {
+    mount:mount,
+    destroy:destroy
+  };
+}
+
+const game = {
+
+  id:GAME_ID,
+
+  name:
+    'SHOOT THE CUE BALL',
+
+  title:
+    'SHOOT THE CUE BALL',
+
+  description:
+    '3ラウンドで落下するキューボールの中心を撃ち、合計300点を目指すタイミングゲーム。',
+
+  controls:
+    'SPACE：射撃・開始・次のラウンド・再挑戦',
+
+  orientation:
+    'portrait',
+
+  aspectRatio:
+    '3:4',
+
+  instance:null,
+
+  mount:function(target){
+
+    this.destroy();
+
+    this.instance =
+      createGame();
+
+    this.instance.mount(
+      target
+    );
+  },
+
+  destroy:function(){
+
+    if(this.instance){
+
+      this.instance.destroy();
+
+      this.instance = null;
+    }
+  }
+};
+
+if(
+  window.MiniGames &&
+  typeof
+  window.MiniGames.register ===
+  'function'
+){
+
+  window.MiniGames.register(
+    game
+  );
+
+}else{
+
+  document.documentElement.style.width =
+    '100%';
+
+  document.documentElement.style.height =
+    '100%';
+
+  document.body.style.cssText =
+    'margin:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'overflow:hidden;' +
+    'background:#000;';
+
+  const host =
+    document.createElement(
+      'div'
+    );
+
+  host.style.cssText =
+    'position:fixed;' +
+    'inset:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'background:#000;';
+
+  document.body.appendChild(
+    host
+  );
+
+  game.mount(
+    host
+  );
+}
+
+})();
+</script>
+<!-- ==================================================================================== GAME BLOCK 10 END ==================================================================================== -->
+
+
+
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 11
      タイトル
 ======================================================================================================================================================================================================= -->
 
-<!-- ==================================================================================== GAME BLOCK 08 END ==================================================================================== -->
+<!-- ==================================================================================== GAME BLOCK 11 END ==================================================================================== -->
+
+
+
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 12
+     タイトル
+======================================================================================================================================================================================================= -->
+
+<!-- ==================================================================================== GAME BLOCK 12 END ==================================================================================== -->
 
 
 
