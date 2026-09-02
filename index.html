@@ -21556,9 +21556,2586 @@ if(
 
 <!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 11
-     タイトル
+     DUAL TASK LINE & SHOOT
 ======================================================================================================================================================================================================= -->
+<style>
+.dtls-root{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:480px;
+  overflow:hidden;
+  background:#000;
+  outline:none;
+  user-select:none;
+  -webkit-user-select:none;
+  font-family:Arial,"Yu Gothic",sans-serif;
+}
+.dtls-root canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+</style>
 
+<script>
+(function(){
+
+'use strict';
+
+const GAME_ID='dual-task-line-shooter';
+
+function createGame(){
+
+  const W=960;
+  const H=720;
+  const TAU=Math.PI*2;
+
+  const CFG={
+    startTime:30,
+
+    hitTimeBonus:1.5,
+    missTimePenalty:1.0,
+    shotCooldown:0.60,
+
+    timeUpSeconds:1.10,
+    fadeSeconds:0.28,
+
+    shootX:35,
+    shootY:122,
+    shootW:395,
+    shootH:510,
+
+    puzzleX:530,
+    puzzleY:122,
+    puzzleW:395,
+    puzzleH:510,
+
+    /*
+      射撃エリアと一筆書きエリアで
+      共通して使用する背景色。
+    */
+    areaBackgroundColor:'#263445',
+
+/*
+  敵の中心位置と移動設定。
+
+  両手を含めた敵全体が、
+  射撃エリアからはみ出さない範囲で往復する。
+*/
+enemyMinX:145,
+enemyMaxX:320,
+enemyY:390,
+enemySpeed:43,
+
+    headRadius:38,
+    torsoWidth:100,
+    torsoHeight:145,
+    limbWidth:42,
+
+    crosshairRadius:18,
+    crosshairSpeed:285,
+
+    reflectionVariation:0.12,
+    minimumAxisRatio:0.20,
+
+    areaFlashSeconds:0.24,
+    timeChangeSeconds:0.80,
+
+    arrowRepeatDelay:0.22,
+    arrowRepeatInterval:0.10,
+
+    puzzleClearSeconds:0.30,
+    puzzleFailSeconds:0.48,
+
+    generationAttempts:600,
+
+    rankS:10,
+    rankA:9,
+    rankB:8,
+    rankC:7,
+    rankD:6,
+    rankE:5,
+
+    debug:false
+  };
+
+  let root=null;
+  let canvas=null;
+  let ctx=null;
+
+  let animationFrame=0;
+  let previousTime=0;
+  let destroyed=false;
+
+  let canvasScale=1;
+  let canvasOffsetX=0;
+  let canvasOffsetY=0;
+
+  let mode='title';
+  let testMode=false;
+
+  let remainingTime=CFG.startTime;
+  let score=0;
+
+  let enemyX=230;
+  let enemyDirection=1;
+
+  let crosshairX=140;
+  let crosshairY=220;
+  let crosshairVX=0;
+  let crosshairVY=0;
+
+  let shotCooldown=0;
+  let shotPulse=0;
+  let shotRings=[];
+
+  let areaFlash=0;
+  let areaFlashType='hit';
+
+  let timeChangeTimer=0;
+  let timeChangeValue=0;
+
+  let timeUpTimer=0;
+  let fadeTimer=0;
+
+  let puzzle=null;
+  let puzzleState='active';
+  let puzzleEffectTimer=0;
+
+  let heldArrow=null;
+  let heldArrowTime=0;
+  let nextArrowRepeat=0;
+
+  let spaceReady=true;
+  let shiftDown=false;
+
+  function clamp(value,minimum,maximum){
+    return Math.max(minimum,Math.min(maximum,value));
+  }
+
+  function randomRange(minimum,maximum){
+    return minimum+Math.random()*(maximum-minimum);
+  }
+
+  function randomInteger(minimum,maximum){
+    return Math.floor(randomRange(minimum,maximum+1));
+  }
+
+  function shuffle(array){
+    for(let i=array.length-1;i>0;i--){
+      const j=randomInteger(0,i);
+      const temporary=array[i];
+      array[i]=array[j];
+      array[j]=temporary;
+    }
+    return array;
+  }
+
+  function easeOutCubic(value){
+    return 1-Math.pow(1-value,3);
+  }
+
+  function cellKey(x,y){
+    return x+','+y;
+  }
+
+  function getNeighbors(x,y,size){
+    const result=[];
+
+    if(x>0){
+      result.push({x:x-1,y:y});
+    }
+
+    if(x<size-1){
+      result.push({x:x+1,y:y});
+    }
+
+    if(y>0){
+      result.push({x:x,y:y-1});
+    }
+
+    if(y<size-1){
+      result.push({x:x,y:y+1});
+    }
+
+    return result;
+  }
+
+  function distanceToSegment(px,py,ax,ay,bx,by){
+    const dx=bx-ax;
+    const dy=by-ay;
+    const lengthSquared=dx*dx+dy*dy;
+
+    if(lengthSquared===0){
+      return Math.hypot(px-ax,py-ay);
+    }
+
+    const t=clamp(
+      ((px-ax)*dx+(py-ay)*dy)/lengthSquared,
+      0,
+      1
+    );
+
+    return Math.hypot(
+      px-(ax+dx*t),
+      py-(ay+dy*t)
+    );
+  }
+
+  function roundedRect(x,y,width,height,radius){
+    radius=Math.min(radius,width/2,height/2);
+
+    ctx.beginPath();
+    ctx.moveTo(x+radius,y);
+    ctx.lineTo(x+width-radius,y);
+    ctx.quadraticCurveTo(x+width,y,x+width,y+radius);
+    ctx.lineTo(x+width,y+height-radius);
+    ctx.quadraticCurveTo(
+      x+width,
+      y+height,
+      x+width-radius,
+      y+height
+    );
+    ctx.lineTo(x+radius,y+height);
+    ctx.quadraticCurveTo(x,y+height,x,y+height-radius);
+    ctx.lineTo(x,y+radius);
+    ctx.quadraticCurveTo(x,y,x+radius,y);
+    ctx.closePath();
+  }
+
+  function getRank(){
+    if(score>=CFG.rankS){return'S';}
+    if(score>=CFG.rankA){return'A';}
+    if(score>=CFG.rankB){return'B';}
+    if(score>=CFG.rankC){return'C';}
+    if(score>=CFG.rankD){return'D';}
+    if(score>=CFG.rankE){return'E';}
+    return'F';
+  }
+
+  function getRankColor(rank){
+    const colors={
+      F:'#69D9FF',
+      E:'#9BE04B',
+      D:'#FFD84A',
+      C:'#FF982F',
+      B:'#FF4242',
+      A:'#FF69B4',
+      S:'#FF6F78'
+    };
+
+    return colors[rank];
+  }
+
+  function normalizeCrosshairVelocity(){
+    let x=crosshairVX;
+    let y=crosshairVY;
+    let length=Math.hypot(x,y);
+
+    if(length===0){
+      x=1;
+      y=0.5;
+      length=Math.hypot(x,y);
+    }
+
+    x/=length;
+    y/=length;
+
+    if(Math.abs(x)<CFG.minimumAxisRatio){
+      x=CFG.minimumAxisRatio*(x<0?-1:1);
+    }
+
+    if(Math.abs(y)<CFG.minimumAxisRatio){
+      y=CFG.minimumAxisRatio*(y<0?-1:1);
+    }
+
+    length=Math.hypot(x,y);
+
+    crosshairVX=x/length*CFG.crosshairSpeed;
+    crosshairVY=y/length*CFG.crosshairSpeed;
+  }
+
+  function initializeCrosshair(){
+    crosshairX=CFG.shootX+CFG.shootW*0.31;
+    crosshairY=CFG.shootY+CFG.shootH*0.30;
+
+    /*
+      真横より少し下、
+      それより下、
+      さらに下の3候補。
+    */
+    const startAngles=[
+      Math.PI*0.08,
+      Math.PI*0.16,
+      Math.PI*0.24
+    ];
+
+    const angle=startAngles[
+      randomInteger(0,startAngles.length-1)
+    ];
+
+    crosshairVX=Math.cos(angle)*CFG.crosshairSpeed;
+    crosshairVY=Math.sin(angle)*CFG.crosshairSpeed;
+
+    normalizeCrosshairVelocity();
+  }
+
+  function perturbReflection(){
+    const angle=
+      Math.atan2(crosshairVY,crosshairVX)+
+      randomRange(
+        -CFG.reflectionVariation,
+        CFG.reflectionVariation
+      );
+
+    crosshairVX=Math.cos(angle)*CFG.crosshairSpeed;
+    crosshairVY=Math.sin(angle)*CFG.crosshairSpeed;
+
+    normalizeCrosshairVelocity();
+  }
+
+  function updateCrosshair(deltaTime){
+    const minimumX=
+      CFG.shootX+
+      CFG.crosshairRadius+
+      12;
+
+    const maximumX=
+      CFG.shootX+
+      CFG.shootW-
+      CFG.crosshairRadius-
+      12;
+
+    const minimumY=
+      CFG.shootY+
+      CFG.crosshairRadius+
+      12;
+
+    const maximumY=
+      CFG.shootY+
+      CFG.shootH-
+      CFG.crosshairRadius-
+      12;
+
+    crosshairX+=crosshairVX*deltaTime;
+    crosshairY+=crosshairVY*deltaTime;
+
+    let reflected=false;
+
+    if(crosshairX<minimumX){
+      crosshairX=minimumX;
+      crosshairVX=Math.abs(crosshairVX);
+      reflected=true;
+    }
+
+    if(crosshairX>maximumX){
+      crosshairX=maximumX;
+      crosshairVX=-Math.abs(crosshairVX);
+      reflected=true;
+    }
+
+    if(crosshairY<minimumY){
+      crosshairY=minimumY;
+      crosshairVY=Math.abs(crosshairVY);
+      reflected=true;
+    }
+
+    if(crosshairY>maximumY){
+      crosshairY=maximumY;
+      crosshairVY=-Math.abs(crosshairVY);
+      reflected=true;
+    }
+
+    if(reflected){
+      perturbReflection();
+    }
+  }
+
+  function updateEnemy(deltaTime){
+    enemyX+=enemyDirection*CFG.enemySpeed*deltaTime;
+
+    if(enemyX<=CFG.enemyMinX){
+      enemyX=CFG.enemyMinX;
+      enemyDirection=1;
+    }
+
+    if(enemyX>=CFG.enemyMaxX){
+      enemyX=CFG.enemyMaxX;
+      enemyDirection=-1;
+    }
+  }
+
+  function isCrosshairOnEnemy(){
+    const x=crosshairX-enemyX;
+    const y=crosshairY-CFG.enemyY;
+
+    if(
+      Math.hypot(x,y+132)<=
+      CFG.headRadius+4
+    ){
+      return true;
+    }
+
+    if(
+      x>=-CFG.torsoWidth/2&&
+      x<=CFG.torsoWidth/2&&
+      y>=-98&&
+      y<=47
+    ){
+      return true;
+    }
+
+    if(
+      distanceToSegment(
+        x,y,
+        -27,-77,
+        -72,-145
+      )<=CFG.limbWidth/2+4
+    ){
+      return true;
+    }
+
+    if(
+      distanceToSegment(
+        x,y,
+        27,-77,
+        72,-145
+      )<=CFG.limbWidth/2+4
+    ){
+      return true;
+    }
+
+    if(
+      Math.hypot(x+72,y+145)<=
+      CFG.limbWidth*0.68
+    ){
+      return true;
+    }
+
+    if(
+      Math.hypot(x-72,y+145)<=
+      CFG.limbWidth*0.68
+    ){
+      return true;
+    }
+
+    if(
+      distanceToSegment(
+        x,y,
+        -28,36,
+        -55,116
+      )<=CFG.limbWidth/2+4
+    ){
+      return true;
+    }
+
+    if(
+      distanceToSegment(
+        x,y,
+        28,36,
+        55,116
+      )<=CFG.limbWidth/2+4
+    ){
+      return true;
+    }
+
+    return false;
+  }
+
+  function shoot(){
+    if(
+      mode!=='play'||
+      shotCooldown>0
+    ){
+      return;
+    }
+
+    shotCooldown=CFG.shotCooldown;
+    shotPulse=1;
+
+    const hit=isCrosshairOnEnemy();
+
+    shotRings.push({
+      x:crosshairX,
+      y:crosshairY,
+      radius:CFG.crosshairRadius,
+      life:0.22,
+      maximumLife:0.22,
+      hit:hit
+    });
+
+    if(hit){
+      if(!testMode){
+        remainingTime+=CFG.hitTimeBonus;
+      }
+
+      timeChangeValue=CFG.hitTimeBonus;
+      areaFlashType='hit';
+    }else{
+      if(!testMode){
+        remainingTime=Math.max(
+          0,
+          remainingTime-CFG.missTimePenalty
+        );
+      }
+
+      timeChangeValue=-CFG.missTimePenalty;
+      areaFlashType='miss';
+    }
+
+    areaFlash=CFG.areaFlashSeconds;
+    timeChangeTimer=CFG.timeChangeSeconds;
+
+    if(
+      !testMode&&
+      remainingTime<=0
+    ){
+      beginTimeUp();
+    }
+  }
+
+  function getPuzzleSettings(){
+    if(score<3){
+      return{
+        size:5,
+        minimumLength:14,
+        maximumLength:18,
+        maximumExtraConnections:6
+      };
+    }
+
+    if(score<6){
+      return{
+        size:6,
+        minimumLength:18,
+        maximumLength:24,
+        maximumExtraConnections:9
+      };
+    }
+
+    if(score<9){
+      return{
+        size:6,
+        minimumLength:22,
+        maximumLength:29,
+        maximumExtraConnections:13
+      };
+    }
+
+    return{
+      size:6,
+      minimumLength:27,
+      maximumLength:34,
+      maximumExtraConnections:18
+    };
+  }
+
+  function generatePath(size,targetLength){
+    const start={
+      x:randomInteger(0,size-1),
+      y:randomInteger(0,size-1)
+    };
+
+    const path=[start];
+
+    const visited=new Set([
+      cellKey(start.x,start.y)
+    ]);
+
+    function search(){
+      if(path.length===targetLength){
+        return true;
+      }
+
+      const current=path[path.length-1];
+
+      let candidates=getNeighbors(
+        current.x,
+        current.y,
+        size
+      ).filter(function(cell){
+        return !visited.has(
+          cellKey(cell.x,cell.y)
+        );
+      });
+
+      candidates=shuffle(candidates);
+
+      candidates.sort(function(a,b){
+        const aOptions=getNeighbors(
+          a.x,
+          a.y,
+          size
+        ).filter(function(cell){
+          return !visited.has(
+            cellKey(cell.x,cell.y)
+          );
+        }).length;
+
+        const bOptions=getNeighbors(
+          b.x,
+          b.y,
+          size
+        ).filter(function(cell){
+          return !visited.has(
+            cellKey(cell.x,cell.y)
+          );
+        }).length;
+
+        return aOptions-bOptions;
+      });
+
+      for(const candidate of candidates){
+        const key=cellKey(
+          candidate.x,
+          candidate.y
+        );
+
+        visited.add(key);
+        path.push(candidate);
+
+        if(search()){
+          return true;
+        }
+
+        path.pop();
+        visited.delete(key);
+      }
+
+      return false;
+    }
+
+    return search()?path:null;
+  }
+
+  function countExtraConnections(path,size){
+    const indices=new Map();
+
+    for(let i=0;i<path.length;i++){
+      indices.set(
+        cellKey(path[i].x,path[i].y),
+        i
+      );
+    }
+
+    let count=0;
+
+    for(let i=0;i<path.length;i++){
+      const neighbors=getNeighbors(
+        path[i].x,
+        path[i].y,
+        size
+      );
+
+      for(const neighbor of neighbors){
+        const index=indices.get(
+          cellKey(
+            neighbor.x,
+            neighbor.y
+          )
+        );
+
+        if(
+          index!==undefined&&
+          Math.abs(index-i)>1
+        ){
+          count++;
+        }
+      }
+    }
+
+    return Math.floor(count/2);
+  }
+
+  function buildPuzzle(size,path){
+    const active=new Set();
+
+    for(const cell of path){
+      active.add(
+        cellKey(cell.x,cell.y)
+      );
+    }
+
+    const start=path[0];
+    const goal=path[path.length-1];
+
+    return{
+      size:size,
+      active:active,
+      solution:path.slice(),
+
+      start:{
+        x:start.x,
+        y:start.y
+      },
+
+      goal:{
+        x:goal.x,
+        y:goal.y
+      },
+
+      current:{
+        x:start.x,
+        y:start.y
+      },
+
+      visited:new Set([
+        cellKey(start.x,start.y)
+      ]),
+
+      trail:[{
+        x:start.x,
+        y:start.y
+      }]
+    };
+  }
+
+  function fallbackPuzzle(){
+    return buildPuzzle(
+      5,
+      [
+        {x:0,y:0},
+        {x:1,y:0},
+        {x:2,y:0},
+        {x:3,y:0},
+        {x:4,y:0},
+        {x:4,y:1},
+        {x:3,y:1},
+        {x:2,y:1},
+        {x:1,y:1},
+        {x:0,y:1},
+        {x:0,y:2},
+        {x:1,y:2},
+        {x:2,y:2},
+        {x:3,y:2},
+        {x:4,y:2}
+      ]
+    );
+  }
+
+  function generatePuzzle(){
+    const settings=getPuzzleSettings();
+
+    for(
+      let attempt=0;
+      attempt<CFG.generationAttempts;
+      attempt++
+    ){
+      const length=randomInteger(
+        settings.minimumLength,
+        settings.maximumLength
+      );
+
+      const path=generatePath(
+        settings.size,
+        length
+      );
+
+      if(!path){
+        continue;
+      }
+
+      if(
+        countExtraConnections(
+          path,
+          settings.size
+        )>
+        settings.maximumExtraConnections
+      ){
+        continue;
+      }
+
+      return buildPuzzle(
+        settings.size,
+        path
+      );
+    }
+
+    return fallbackPuzzle();
+  }
+
+  function startNewPuzzle(){
+    puzzle=generatePuzzle();
+    puzzleState='active';
+    puzzleEffectTimer=0;
+
+    heldArrow=null;
+    heldArrowTime=0;
+    nextArrowRepeat=0;
+  }
+
+  function hasRemainingSolution(){
+    if(!puzzle){
+      return false;
+    }
+
+    let explored=0;
+    const maximumExplored=80000;
+
+    function search(current,visited){
+      explored++;
+
+      if(explored>maximumExplored){
+        return true;
+      }
+
+      if(
+        visited.size===
+        puzzle.active.size
+      ){
+        return(
+          current.x===puzzle.goal.x&&
+          current.y===puzzle.goal.y
+        );
+      }
+
+      let candidates=getNeighbors(
+        current.x,
+        current.y,
+        puzzle.size
+      ).filter(function(cell){
+        const key=cellKey(
+          cell.x,
+          cell.y
+        );
+
+        return(
+          puzzle.active.has(key)&&
+          !visited.has(key)
+        );
+      });
+
+      candidates=candidates.filter(
+        function(cell){
+          const goal=
+            cell.x===puzzle.goal.x&&
+            cell.y===puzzle.goal.y;
+
+          if(!goal){
+            return true;
+          }
+
+          return(
+            visited.size===
+            puzzle.active.size-1
+          );
+        }
+      );
+
+      for(const candidate of candidates){
+        const key=cellKey(
+          candidate.x,
+          candidate.y
+        );
+
+        visited.add(key);
+
+        if(search(candidate,visited)){
+          return true;
+        }
+
+        visited.delete(key);
+      }
+
+      return false;
+    }
+
+    return search(
+      puzzle.current,
+      new Set(puzzle.visited)
+    );
+  }
+
+  function completePuzzle(){
+    score++;
+    puzzleState='clear';
+    puzzleEffectTimer=
+      CFG.puzzleClearSeconds;
+    heldArrow=null;
+  }
+
+  function failPuzzle(){
+    puzzleState='failed';
+    puzzleEffectTimer=
+      CFG.puzzleFailSeconds;
+    heldArrow=null;
+  }
+
+  function movePuzzle(direction){
+    if(
+      mode!=='play'||
+      puzzleState!=='active'||
+      !puzzle
+    ){
+      return;
+    }
+
+    const movements={
+      ArrowLeft:{x:-1,y:0},
+      ArrowRight:{x:1,y:0},
+      ArrowUp:{x:0,y:-1},
+      ArrowDown:{x:0,y:1}
+    };
+
+    const movement=movements[direction];
+
+    if(!movement){
+      return;
+    }
+
+    const next={
+      x:puzzle.current.x+movement.x,
+      y:puzzle.current.y+movement.y
+    };
+
+    const key=cellKey(next.x,next.y);
+
+    if(
+      !puzzle.active.has(key)||
+      puzzle.visited.has(key)
+    ){
+      return;
+    }
+
+    puzzle.current=next;
+    puzzle.visited.add(key);
+    puzzle.trail.push({
+      x:next.x,
+      y:next.y
+    });
+
+    const allVisited=
+      puzzle.visited.size===
+      puzzle.active.size;
+
+    const reachedGoal=
+      next.x===puzzle.goal.x&&
+      next.y===puzzle.goal.y;
+
+    if(allVisited){
+      if(reachedGoal){
+        completePuzzle();
+      }else{
+        failPuzzle();
+      }
+
+      return;
+    }
+
+    if(reachedGoal){
+      failPuzzle();
+      return;
+    }
+
+    if(!hasRemainingSolution()){
+      failPuzzle();
+    }
+  }
+
+  function startGame(infiniteMode){
+    testMode=infiniteMode;
+    remainingTime=CFG.startTime;
+    score=0;
+
+/*
+  射撃エリアの横方向中央から開始する。
+*/
+enemyX=
+  CFG.shootX+
+  CFG.shootW/2;
+
+    enemyDirection=
+      Math.random()<0.5?-1:1;
+
+    shotCooldown=0;
+    shotPulse=0;
+    shotRings=[];
+
+    areaFlash=0;
+    timeChangeTimer=0;
+
+    timeUpTimer=0;
+    fadeTimer=0;
+
+    initializeCrosshair();
+    startNewPuzzle();
+
+    mode='play';
+    spaceReady=false;
+  }
+
+  function beginTimeUp(){
+    if(mode!=='play'){
+      return;
+    }
+
+    remainingTime=0;
+    timeUpTimer=0;
+    heldArrow=null;
+    mode='timeUp';
+  }
+
+  function updateHeldArrow(deltaTime){
+    if(
+      !heldArrow||
+      mode!=='play'||
+      puzzleState!=='active'
+    ){
+      return;
+    }
+
+    heldArrowTime+=deltaTime;
+
+    if(
+      heldArrowTime<
+      CFG.arrowRepeatDelay
+    ){
+      return;
+    }
+
+    if(
+      heldArrowTime>=
+      nextArrowRepeat
+    ){
+      movePuzzle(heldArrow);
+
+      nextArrowRepeat+=
+        CFG.arrowRepeatInterval;
+    }
+  }
+
+  function updateEffects(deltaTime){
+    shotPulse=Math.max(
+      0,
+      shotPulse-deltaTime*8
+    );
+
+    areaFlash=Math.max(
+      0,
+      areaFlash-deltaTime
+    );
+
+    timeChangeTimer=Math.max(
+      0,
+      timeChangeTimer-deltaTime
+    );
+
+    for(
+      let i=shotRings.length-1;
+      i>=0;
+      i--
+    ){
+      const ring=shotRings[i];
+
+      ring.life-=deltaTime;
+      ring.radius+=deltaTime*90;
+
+      if(ring.life<=0){
+        shotRings.splice(i,1);
+      }
+    }
+  }
+
+  function update(deltaTime){
+    updateEffects(deltaTime);
+
+    if(mode==='play'){
+      updateHeldArrow(deltaTime);
+
+      if(
+        puzzleState==='clear'||
+        puzzleState==='failed'
+      ){
+        puzzleEffectTimer-=deltaTime;
+
+        if(puzzleEffectTimer<=0){
+          startNewPuzzle();
+        }
+      }
+
+      updateEnemy(deltaTime);
+      updateCrosshair(deltaTime);
+
+      shotCooldown=Math.max(
+        0,
+        shotCooldown-deltaTime
+      );
+
+      if(!testMode){
+        remainingTime-=deltaTime;
+
+        if(remainingTime<=0){
+          beginTimeUp();
+        }
+      }
+
+    }else if(mode==='timeUp'){
+      timeUpTimer+=deltaTime;
+
+      if(
+        timeUpTimer>=
+        CFG.timeUpSeconds
+      ){
+        fadeTimer=0;
+        mode='resultFade';
+      }
+
+    }else if(mode==='resultFade'){
+      fadeTimer+=deltaTime;
+
+      if(fadeTimer>=CFG.fadeSeconds){
+        spaceReady=false;
+        mode='result';
+      }
+    }
+  }
+
+  function drawGameBackground(){
+    const gradient=
+      ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        H
+      );
+
+    gradient.addColorStop(
+      0,
+      '#294760'
+    );
+
+    gradient.addColorStop(
+      0.55,
+      '#1c3248'
+    );
+
+    gradient.addColorStop(
+      1,
+      '#101d2a'
+    );
+
+    ctx.fillStyle=gradient;
+    ctx.fillRect(0,0,W,H);
+
+    const glow=
+      ctx.createRadialGradient(
+        W/2,
+        270,
+        20,
+        W/2,
+        270,
+        520
+      );
+
+    glow.addColorStop(
+      0,
+      'rgba(102,195,245,.16)'
+    );
+
+    glow.addColorStop(
+      1,
+      'rgba(0,0,0,0)'
+    );
+
+    ctx.fillStyle=glow;
+    ctx.fillRect(0,0,W,H);
+  }
+
+  function drawPanel(
+    x,
+    y,
+    width,
+    height,
+    color
+  ){
+    roundedRect(
+      x,
+      y,
+      width,
+      height,
+      18
+    );
+
+    ctx.fillStyle=color;
+    ctx.fill();
+
+    const light=
+      ctx.createLinearGradient(
+        0,
+        y,
+        0,
+        y+height
+      );
+
+    light.addColorStop(
+      0,
+      'rgba(255,255,255,.09)'
+    );
+
+    light.addColorStop(
+      0.48,
+      'rgba(255,255,255,0)'
+    );
+
+    light.addColorStop(
+      1,
+      'rgba(0,0,0,.14)'
+    );
+
+    ctx.fillStyle=light;
+    ctx.fill();
+
+    ctx.strokeStyle=
+      'rgba(215,238,250,.28)';
+
+    ctx.lineWidth=3;
+    ctx.stroke();
+  }
+
+  function drawEnemy(){
+    ctx.save();
+    ctx.translate(enemyX,CFG.enemyY);
+    ctx.lineCap='round';
+
+    const body=
+      ctx.createLinearGradient(
+        -55,
+        -190,
+        65,
+        125
+      );
+
+    body.addColorStop(0,'#f1f5f7');
+    body.addColorStop(0.5,'#a3afb5');
+    body.addColorStop(1,'#4f5960');
+
+    ctx.strokeStyle=body;
+    ctx.fillStyle=body;
+    ctx.lineWidth=CFG.limbWidth;
+
+    /*
+      上げた両腕。
+    */
+    ctx.beginPath();
+    ctx.moveTo(-38,-70);
+    ctx.lineTo(-84,-160);
+    ctx.moveTo(38,-70);
+    ctx.lineTo(84,-160);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(
+      -84,
+      -160,
+      CFG.limbWidth*0.58,
+      0,
+      TAU
+    );
+    ctx.arc(
+      84,
+      -160,
+      CFG.limbWidth*0.58,
+      0,
+      TAU
+    );
+    ctx.fill();
+
+    /*
+      脚。
+    */
+    ctx.beginPath();
+    ctx.moveTo(-28,35);
+    ctx.lineTo(-55,116);
+    ctx.moveTo(28,35);
+    ctx.lineTo(55,116);
+    ctx.stroke();
+
+    /*
+      胴体。
+    */
+    roundedRect(
+      -CFG.torsoWidth/2,
+      -98,
+      CFG.torsoWidth,
+      CFG.torsoHeight,
+      24
+    );
+
+    ctx.fillStyle=body;
+    ctx.fill();
+
+    ctx.strokeStyle=
+      'rgba(255,255,255,.28)';
+
+    ctx.lineWidth=2;
+    ctx.stroke();
+
+    /*
+      頭。
+    */
+    const head=
+      ctx.createRadialGradient(
+        -12,
+        -149,
+        4,
+        0,
+        -132,
+        CFG.headRadius
+      );
+
+    head.addColorStop(0,'#ffffff');
+    head.addColorStop(0.65,'#adb8bd');
+    head.addColorStop(1,'#515c62');
+
+    ctx.fillStyle=head;
+
+    ctx.beginPath();
+    ctx.arc(
+      0,
+      -132,
+      CFG.headRadius,
+      0,
+      TAU
+    );
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawCrosshair(){
+    ctx.save();
+    ctx.translate(
+      crosshairX,
+      crosshairY
+    );
+
+    const pulse=1+shotPulse*0.22;
+    ctx.scale(pulse,pulse);
+
+    ctx.strokeStyle='#ff554c';
+    ctx.fillStyle='#ff554c';
+    ctx.shadowColor='#ff3e36';
+    ctx.shadowBlur=8;
+    ctx.lineWidth=3;
+
+    ctx.beginPath();
+    ctx.arc(
+      0,
+      0,
+      CFG.crosshairRadius,
+      0,
+      TAU
+    );
+
+    ctx.moveTo(-32,0);
+    ctx.lineTo(-13,0);
+    ctx.moveTo(13,0);
+    ctx.lineTo(32,0);
+    ctx.moveTo(0,-32);
+    ctx.lineTo(0,-13);
+    ctx.moveTo(0,13);
+    ctx.lineTo(0,32);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.arc(0,0,3,0,TAU);
+    ctx.fill();
+
+    ctx.restore();
+  }
+
+  function drawShotRings(){
+    for(const ring of shotRings){
+      ctx.save();
+
+      ctx.globalAlpha=clamp(
+        ring.life/ring.maximumLife,
+        0,
+        1
+      );
+
+      ctx.strokeStyle=
+        ring.hit
+          ?'#9cff62'
+          :'#ff5252';
+
+      ctx.lineWidth=3;
+
+      ctx.beginPath();
+      ctx.arc(
+        ring.x,
+        ring.y,
+        ring.radius,
+        0,
+        TAU
+      );
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function drawShootArea(){
+    drawPanel(
+      CFG.shootX,
+      CFG.shootY,
+      CFG.shootW,
+      CFG.shootH,
+      CFG.areaBackgroundColor
+    );
+
+    drawEnemy();
+    drawCrosshair();
+    drawShotRings();
+
+    if(areaFlash>0){
+      ctx.save();
+
+      ctx.globalAlpha=
+        areaFlash/
+        CFG.areaFlashSeconds;
+
+      ctx.strokeStyle=
+        areaFlashType==='hit'
+          ?'#9cff62'
+          :'#ff4f4f';
+
+      ctx.shadowColor=ctx.strokeStyle;
+      ctx.shadowBlur=24;
+      ctx.lineWidth=7;
+
+      roundedRect(
+        CFG.shootX+3,
+        CFG.shootY+3,
+        CFG.shootW-6,
+        CFG.shootH-6,
+        16
+      );
+
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if(shotCooldown>0){
+      const progress=
+        1-
+        shotCooldown/
+        CFG.shotCooldown;
+
+      ctx.fillStyle=
+        'rgba(0,0,0,.40)';
+
+      ctx.fillRect(
+        CFG.shootX+78,
+        CFG.shootY+
+        CFG.shootH-34,
+        CFG.shootW-156,
+        8
+      );
+
+      ctx.fillStyle='#ff7769';
+
+      ctx.fillRect(
+        CFG.shootX+78,
+        CFG.shootY+
+        CFG.shootH-34,
+        (CFG.shootW-156)*progress,
+        8
+      );
+    }
+  }
+
+  function getPuzzleLayout(){
+    const padding=48;
+
+    const cellSize=Math.min(
+      (
+        CFG.puzzleW-
+        padding*2
+      )/
+      puzzle.size,
+
+      (
+        CFG.puzzleH-
+        padding*2
+      )/
+      puzzle.size
+    );
+
+    return{
+      cellSize:cellSize,
+
+      originX:
+        CFG.puzzleX+
+        (
+          CFG.puzzleW-
+          cellSize*puzzle.size
+        )/2,
+
+      originY:
+        CFG.puzzleY+
+        (
+          CFG.puzzleH-
+          cellSize*puzzle.size
+        )/2
+    };
+  }
+
+  function getCellCenter(x,y){
+    const layout=getPuzzleLayout();
+
+    return{
+      x:
+        layout.originX+
+        (x+0.5)*
+        layout.cellSize,
+
+      y:
+        layout.originY+
+        (y+0.5)*
+        layout.cellSize
+    };
+  }
+
+  function drawStar(
+    centerX,
+    centerY,
+    outerRadius,
+    innerRadius
+  ){
+    ctx.beginPath();
+
+    for(let i=0;i<10;i++){
+      const radius=
+        i%2===0
+          ?outerRadius
+          :innerRadius;
+
+      const angle=
+        -Math.PI/2+
+        i*Math.PI/5;
+
+      const x=
+        centerX+
+        Math.cos(angle)*radius;
+
+      const y=
+        centerY+
+        Math.sin(angle)*radius;
+
+      if(i===0){
+        ctx.moveTo(x,y);
+      }else{
+        ctx.lineTo(x,y);
+      }
+    }
+
+    ctx.closePath();
+  }
+
+  function drawPuzzle(){
+    drawPanel(
+      CFG.puzzleX,
+      CFG.puzzleY,
+      CFG.puzzleW,
+      CFG.puzzleH,
+      CFG.areaBackgroundColor
+    );
+
+    if(!puzzle){
+      return;
+    }
+
+    const layout=getPuzzleLayout();
+    const cellSize=layout.cellSize;
+
+    for(let y=0;y<puzzle.size;y++){
+      for(let x=0;x<puzzle.size;x++){
+        const key=cellKey(x,y);
+
+        if(!puzzle.active.has(key)){
+          continue;
+        }
+
+        const center=getCellCenter(x,y);
+        const squareSize=cellSize*0.75;
+        const visited=puzzle.visited.has(key);
+
+        ctx.fillStyle=
+          visited
+            ?'#4aaada'
+            :'#f4f7f8';
+
+        ctx.strokeStyle=
+          visited
+            ?'#1d7199'
+            :'#81949e';
+
+        ctx.lineWidth=2;
+
+        roundedRect(
+          center.x-squareSize/2,
+          center.y-squareSize/2,
+          squareSize,
+          squareSize,
+          Math.max(
+            6,
+            squareSize*0.13
+          )
+        );
+
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+
+    if(puzzle.trail.length>1){
+      ctx.strokeStyle='#135d84';
+
+      ctx.lineWidth=Math.max(
+        6,
+        cellSize*0.12
+      );
+
+      ctx.lineCap='round';
+      ctx.lineJoin='round';
+      ctx.beginPath();
+
+      for(
+        let i=0;
+        i<puzzle.trail.length;
+        i++
+      ){
+        const center=getCellCenter(
+          puzzle.trail[i].x,
+          puzzle.trail[i].y
+        );
+
+        if(i===0){
+          ctx.moveTo(
+            center.x,
+            center.y
+          );
+        }else{
+          ctx.lineTo(
+            center.x,
+            center.y
+          );
+        }
+      }
+
+      ctx.stroke();
+    }
+
+    const goal=getCellCenter(
+      puzzle.goal.x,
+      puzzle.goal.y
+    );
+
+    ctx.fillStyle='#ffc83d';
+    ctx.strokeStyle='#a96e10';
+    ctx.lineWidth=2;
+
+    drawStar(
+      goal.x,
+      goal.y,
+      cellSize*0.22,
+      cellSize*0.10
+    );
+
+    ctx.fill();
+    ctx.stroke();
+
+    const current=getCellCenter(
+      puzzle.current.x,
+      puzzle.current.y
+    );
+
+    ctx.fillStyle='#ffffff';
+    ctx.strokeStyle='#174f6b';
+    ctx.lineWidth=3;
+
+    ctx.beginPath();
+    ctx.arc(
+      current.x,
+      current.y,
+      cellSize*0.17,
+      0,
+      TAU
+    );
+    ctx.fill();
+    ctx.stroke();
+
+    if(puzzleState==='clear'){
+      ctx.save();
+
+      ctx.strokeStyle='#69ef92';
+      ctx.shadowColor='#69ef92';
+      ctx.shadowBlur=22;
+      ctx.lineWidth=7;
+
+      roundedRect(
+        CFG.puzzleX+3,
+        CFG.puzzleY+3,
+        CFG.puzzleW-6,
+        CFG.puzzleH-6,
+        16
+      );
+
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    if(puzzleState==='failed'){
+      const progress=
+        1-
+        puzzleEffectTimer/
+        CFG.puzzleFailSeconds;
+
+      const scale=
+        0.68+
+        easeOutCubic(
+          clamp(
+            progress*2.2,
+            0,
+            1
+          )
+        )*
+        0.32;
+
+      ctx.save();
+
+      ctx.fillStyle=
+        'rgba(125,15,20,.30)';
+
+      roundedRect(
+        CFG.puzzleX+3,
+        CFG.puzzleY+3,
+        CFG.puzzleW-6,
+        CFG.puzzleH-6,
+        16
+      );
+
+      ctx.fill();
+
+      ctx.translate(
+        CFG.puzzleX+
+        CFG.puzzleW/2,
+
+        CFG.puzzleY+
+        CFG.puzzleH/2
+      );
+
+      ctx.scale(scale,scale);
+
+      ctx.strokeStyle='#ff3838';
+      ctx.shadowColor='#ff2929';
+      ctx.shadowBlur=25;
+      ctx.lineWidth=24;
+      ctx.lineCap='round';
+
+      ctx.beginPath();
+      ctx.moveTo(-72,-72);
+      ctx.lineTo(72,72);
+      ctx.moveTo(72,-72);
+      ctx.lineTo(-72,72);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function drawTime(){
+    const centerX=W/2;
+
+    ctx.fillStyle=
+      'rgba(7,12,19,.78)';
+
+    roundedRect(
+      centerX-120,
+      25,
+      240,
+      76,
+      18
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle=
+      'rgba(210,238,255,.35)';
+
+    ctx.lineWidth=2;
+    ctx.stroke();
+
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+
+    ctx.fillStyle='#abc3d2';
+    ctx.font='800 16px sans-serif';
+    ctx.fillText('TIME',centerX,45);
+
+    const lowTime=
+      !testMode&&
+      remainingTime<=8;
+
+    ctx.fillStyle=
+      lowTime
+        ?'#ff554f'
+        :'#ffffff';
+
+    ctx.font=
+      testMode
+        ?'900 43px sans-serif'
+        :'900 39px monospace';
+
+    ctx.fillText(
+      testMode
+        ?'∞'
+        :Math.max(
+            0,
+            remainingTime
+          ).toFixed(1),
+      centerX,
+      75
+    );
+
+    if(timeChangeTimer>0){
+      const progress=
+        1-
+        timeChangeTimer/
+        CFG.timeChangeSeconds;
+
+      ctx.save();
+
+      ctx.globalAlpha=clamp(
+        1-progress,
+        0,
+        1
+      );
+
+      ctx.fillStyle=
+        timeChangeValue>0
+          ?'#a8ff6b'
+          :'#ff5956';
+
+      ctx.font=
+        '900 28px monospace';
+
+      ctx.fillText(
+        (
+          timeChangeValue>0
+            ?'+'
+            :'-'
+        )+
+        Math.abs(
+          timeChangeValue
+        ).toFixed(1),
+        centerX-165,
+        68-progress*9
+      );
+
+      ctx.restore();
+    }
+  }
+
+  function drawScore(){
+    ctx.fillStyle=
+      'rgba(7,12,19,.74)';
+
+    roundedRect(
+      W/2-90,
+      H-65,
+      180,
+      42,
+      12
+    );
+
+    ctx.fill();
+
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillStyle='#ffffff';
+    ctx.font='800 20px sans-serif';
+
+    ctx.fillText(
+      'SCORE  '+score,
+      W/2,
+      H-44
+    );
+  }
+
+  function drawPlay(){
+    drawGameBackground();
+    drawShootArea();
+    drawPuzzle();
+    drawTime();
+    drawScore();
+  }
+
+  function drawTitle(){
+    drawGameBackground();
+
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='900 67px sans-serif';
+    ctx.fillText(
+      'DUAL TASK',
+      W/2,
+      96
+    );
+
+    ctx.fillStyle='#69d9ff';
+    ctx.font='900 39px sans-serif';
+    ctx.fillText(
+      'SHOOT & LINE',
+      W/2,
+      151
+    );
+
+    /*
+      タイトル画面の左右パネルも
+      同じ背景色に統一。
+    */
+    drawPanel(
+      70,
+      210,
+      360,
+      260,
+      CFG.areaBackgroundColor
+    );
+
+    drawPanel(
+      530,
+      210,
+      360,
+      260,
+      CFG.areaBackgroundColor
+    );
+
+    ctx.fillStyle='#ff6a60';
+    ctx.font='900 24px sans-serif';
+
+    ctx.fillText(
+      'スペースキー',
+      250,
+      246
+    );
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='800 21px sans-serif';
+
+    ctx.fillText(
+      '敵に照準を合わせて撃つ',
+      250,
+      288
+    );
+
+    ctx.fillStyle='#b8c8d2';
+    ctx.font='700 17px sans-serif';
+
+    ctx.fillText(
+      '命中で時間延長',
+      250,
+      327
+    );
+
+    ctx.fillText(
+      '空振りで時間短縮',
+      250,
+      359
+    );
+
+    ctx.fillText(
+      '敵はゆっくり左右へ移動',
+      250,
+      399
+    );
+
+    ctx.fillStyle='#69d9ff';
+    ctx.font='900 24px sans-serif';
+
+    ctx.fillText(
+      '矢印キー',
+      710,
+      246
+    );
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='800 21px sans-serif';
+
+    ctx.fillText(
+      '一筆書きを完成させる',
+      710,
+      288
+    );
+
+    ctx.fillStyle='#b8c8d2';
+    ctx.font='700 17px sans-serif';
+
+    ctx.fillText(
+      '全マスを一度ずつ通る',
+      710,
+      327
+    );
+
+    ctx.fillText(
+      '最後に星へ到達',
+      710,
+      359
+    );
+
+    ctx.fillText(
+      '1問クリアで1ポイント',
+      710,
+      399
+    );
+
+    ctx.fillStyle='#d34b43';
+
+    roundedRect(
+      W/2-175,
+      520,
+      350,
+      72,
+      16
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle='#ffd77a';
+    ctx.lineWidth=3;
+    ctx.stroke();
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='900 26px sans-serif';
+
+    ctx.fillText(
+      'SPACEで開始',
+      W/2,
+      556
+    );
+
+    ctx.fillStyle=
+      'rgba(220,235,245,.64)';
+
+    ctx.font='700 16px sans-serif';
+
+    ctx.fillText(
+      '30秒以内に一筆書きを何問解けるか',
+      W/2,
+      648
+    );
+  }
+
+  function drawTimeUp(){
+    drawPlay();
+
+    const progress=clamp(
+      timeUpTimer/0.22,
+      0,
+      1
+    );
+
+    ctx.fillStyle=
+      'rgba(4,7,10,'+
+      (
+        0.38+
+        progress*0.34
+      )+
+      ')';
+
+    ctx.fillRect(0,0,W,H);
+
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+    ctx.fillStyle='#ff4b45';
+    ctx.font='900 104px sans-serif';
+
+    ctx.fillText(
+      'TIME UP',
+      W/2,
+      H/2
+    );
+  }
+
+  function drawResult(){
+    drawGameBackground();
+
+    const rank=getRank();
+    const rankColor=getRankColor(rank);
+
+    ctx.textAlign='center';
+    ctx.textBaseline='middle';
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='900 42px sans-serif';
+    ctx.fillText('RESULT',W/2,70);
+
+    ctx.fillStyle=
+      'rgba(5,11,18,.62)';
+
+    roundedRect(
+      188,
+      125,
+      584,
+      180,
+      22
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle='#b7c9d4';
+    ctx.font='800 22px sans-serif';
+    ctx.fillText('SCORE',W/2,165);
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='900 105px monospace';
+
+    ctx.fillText(
+      String(score),
+      W/2,
+      241
+    );
+
+    ctx.fillStyle=
+      'rgba(5,11,18,.68)';
+
+    roundedRect(
+      188,
+      330,
+      584,
+      235,
+      22
+    );
+
+    ctx.fill();
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='800 22px sans-serif';
+    ctx.fillText('RANK',W/2,372);
+
+    ctx.fillStyle=rankColor;
+    ctx.shadowColor=rankColor;
+    ctx.shadowBlur=24;
+    ctx.font='900 142px serif';
+
+    ctx.fillText(
+      rank,
+      W/2,
+      475
+    );
+
+    ctx.shadowColor='transparent';
+    ctx.shadowBlur=0;
+
+    ctx.fillStyle='#ffffff';
+    ctx.font='700 19px sans-serif';
+
+    ctx.fillText(
+      'SPACEでタイトルへ戻る',
+      W/2,
+      641
+    );
+  }
+
+  function render(){
+    ctx.setTransform(
+      canvasScale,
+      0,
+      0,
+      canvasScale,
+      canvasOffsetX,
+      canvasOffsetY
+    );
+
+    ctx.clearRect(
+      -canvasOffsetX/canvasScale,
+      -canvasOffsetY/canvasScale,
+      canvas.width/canvasScale,
+      canvas.height/canvasScale
+    );
+
+    ctx.save();
+
+    ctx.beginPath();
+    ctx.rect(0,0,W,H);
+    ctx.clip();
+
+    if(mode==='title'){
+      drawTitle();
+    }else if(mode==='play'){
+      drawPlay();
+    }else if(mode==='timeUp'){
+      drawTimeUp();
+    }else if(mode==='resultFade'){
+      drawTimeUp();
+
+      ctx.fillStyle=
+        'rgba(0,0,0,'+
+        clamp(
+          fadeTimer/
+          CFG.fadeSeconds,
+          0,
+          1
+        )+
+        ')';
+
+      ctx.fillRect(0,0,W,H);
+    }else if(mode==='result'){
+      drawResult();
+    }
+
+    ctx.restore();
+  }
+
+  function isArrowKey(code){
+    return(
+      code==='ArrowLeft'||
+      code==='ArrowRight'||
+      code==='ArrowUp'||
+      code==='ArrowDown'
+    );
+  }
+
+  function keyDown(event){
+    if(
+      event.code==='ShiftLeft'||
+      event.code==='ShiftRight'
+    ){
+      shiftDown=true;
+      return;
+    }
+
+    if(isArrowKey(event.code)){
+      event.preventDefault();
+
+      if(event.repeat){
+        return;
+      }
+
+      heldArrow=event.code;
+      heldArrowTime=0;
+      nextArrowRepeat=
+        CFG.arrowRepeatDelay;
+
+      movePuzzle(event.code);
+      return;
+    }
+
+    if(event.code!=='Space'){
+      return;
+    }
+
+    event.preventDefault();
+
+    if(
+      event.repeat||
+      !spaceReady
+    ){
+      return;
+    }
+
+    spaceReady=false;
+
+    if(mode==='title'){
+      startGame(
+        shiftDown||
+        event.shiftKey
+      );
+      return;
+    }
+
+    if(mode==='play'){
+      shoot();
+      return;
+    }
+
+    if(mode==='result'){
+      mode='title';
+      testMode=false;
+      puzzle=null;
+      shotRings=[];
+      heldArrow=null;
+    }
+  }
+
+  function keyUp(event){
+    if(
+      event.code==='ShiftLeft'||
+      event.code==='ShiftRight'
+    ){
+      shiftDown=false;
+      return;
+    }
+
+    if(isArrowKey(event.code)){
+      event.preventDefault();
+
+      if(heldArrow===event.code){
+        heldArrow=null;
+        heldArrowTime=0;
+      }
+
+      return;
+    }
+
+    if(event.code==='Space'){
+      event.preventDefault();
+      spaceReady=true;
+    }
+  }
+
+  function resize(){
+    if(!root||!canvas){
+      return;
+    }
+
+    const rect=
+      root.getBoundingClientRect();
+
+    const pixelRatio=Math.min(
+      window.devicePixelRatio||1,
+      2
+    );
+
+    canvas.width=Math.max(
+      1,
+      Math.round(
+        rect.width*pixelRatio
+      )
+    );
+
+    canvas.height=Math.max(
+      1,
+      Math.round(
+        rect.height*pixelRatio
+      )
+    );
+
+    canvasScale=Math.min(
+      canvas.width/W,
+      canvas.height/H
+    );
+
+    canvasOffsetX=
+      (
+        canvas.width-
+        W*canvasScale
+      )/2;
+
+    canvasOffsetY=
+      (
+        canvas.height-
+        H*canvasScale
+      )/2;
+  }
+
+  function focusGame(){
+    if(root){
+      root.focus();
+    }
+  }
+
+  function gameLoop(timestamp){
+    if(destroyed){
+      return;
+    }
+
+    const deltaTime=
+      previousTime
+        ?Math.min(
+            0.033,
+            (
+              timestamp-
+              previousTime
+            )/1000
+          )
+        :0;
+
+    previousTime=timestamp;
+
+    update(deltaTime);
+    render();
+
+    animationFrame=
+      requestAnimationFrame(
+        gameLoop
+      );
+  }
+
+  function mount(target){
+    destroyed=false;
+    previousTime=0;
+
+    root=document.createElement('div');
+    root.className='dtls-root';
+    root.tabIndex=0;
+
+    canvas=
+      document.createElement(
+        'canvas'
+      );
+
+    root.appendChild(canvas);
+    target.appendChild(root);
+
+    ctx=canvas.getContext('2d');
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      {passive:false}
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      {passive:false}
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      focusGame
+    );
+
+    animationFrame=
+      requestAnimationFrame(
+        gameLoop
+      );
+
+    setTimeout(focusGame,0);
+  }
+
+  function destroy(){
+    if(destroyed){
+      return;
+    }
+
+    destroyed=true;
+
+    cancelAnimationFrame(
+      animationFrame
+    );
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+      root.removeEventListener(
+        'pointerdown',
+        focusGame
+      );
+
+      root.remove();
+    }
+
+    root=null;
+    canvas=null;
+    ctx=null;
+    puzzle=null;
+    shotRings=[];
+  }
+
+  return{
+    mount:mount,
+    destroy:destroy
+  };
+}
+
+const game={
+  id:GAME_ID,
+
+  name:
+    'DUAL TASK SHOOT & LINE',
+
+  title:
+    'DUAL TASK SHOOT & LINE',
+
+  description:
+    'スペースキーで射撃しながら、矢印キーで一筆書きを解くマルチタスクゲーム。',
+
+  controls:
+    'スペースキー：射撃・開始　矢印キー：一筆書き',
+
+  orientation:
+    'landscape',
+
+  aspectRatio:
+    '4:3',
+
+  instance:null,
+
+  mount:function(target){
+    this.destroy();
+    this.instance=createGame();
+    this.instance.mount(target);
+  },
+
+  destroy:function(){
+    if(this.instance){
+      this.instance.destroy();
+      this.instance=null;
+    }
+  }
+};
+
+if(
+  window.MiniGames&&
+  typeof window.MiniGames.register===
+  'function'
+){
+  window.MiniGames.register(game);
+}else{
+  document.documentElement.style.width='100%';
+  document.documentElement.style.height='100%';
+
+  document.body.style.cssText=
+    'margin:0;'+
+    'width:100%;'+
+    'height:100%;'+
+    'overflow:hidden;'+
+    'background:#000;';
+
+  const host=
+    document.createElement(
+      'div'
+    );
+
+  host.style.cssText=
+    'position:fixed;'+
+    'inset:0;'+
+    'width:100%;'+
+    'height:100%;'+
+    'background:#000;';
+
+  document.body.appendChild(host);
+  game.mount(host);
+}
+
+})();
+</script>
 <!-- ==================================================================================== GAME BLOCK 11 END ==================================================================================== -->
 
 
@@ -21568,11 +24145,3199 @@ if(
 
 <!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 12
+     天井が落ちてくる仕掛け
+======================================================================================================================================================================================================= -->
+<style>
+.ctg-root{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:360px;
+  overflow:hidden;
+  background:#050608;
+  outline:none;
+  user-select:none;
+  -webkit-user-select:none;
+  font-family:system-ui,sans-serif
+}
+.ctg-root canvas{
+  display:block;
+  width:100%;
+  height:100%
+}
+.ctg-focus{
+  position:absolute;
+  right:10px;
+  bottom:8px;
+  color:#9aa1a6;
+  font-size:11px;
+  pointer-events:none
+}
+.ctg-root:focus .ctg-focus{
+  display:none
+}
+</style>
+
+<script>
+(function(){
+'use strict';
+
+const GAME_ID = 'ceiling-trap-ricochet-20260828';
+
+function createCeilingTrap(){
+
+  const W = 600;
+  const H = 800;
+
+  /*
+    ============================================================
+    調整しやすい設定
+    ============================================================
+
+    maxHP
+    ハートのHP。
+
+    heartSize
+    ハートの大きさ。
+
+    ceilingFallSeconds
+    天井が点線へ到達するまでの秒数。
+
+    aimRoundTripSeconds
+    銃が10度から50度へ動き、
+    再び10度へ戻るまでの秒数。
+
+    shotCooldownSeconds
+    次の弾を撃てるようになるまでの秒数。
+
+    bulletSpeed
+    弾の速度。
+
+    bulletRadius
+    弾の大きさ。
+
+    switchRadius
+    スイッチの大きさ。
+    ============================================================
+  */
+
+  const CFG = {
+    maxHP: 3,
+    heartSize: 46,
+    ceilingFallSeconds: 30,
+    aimRoundTripSeconds: 3,
+    shotCooldownSeconds: 2,
+    bulletSpeed: 480,
+    bulletRadius: 6,
+    switchRadius: 15,
+
+    dangerLineY: H * 0.5,
+    ceilingStartY: 70,
+    ceilingHeight: 120,
+    ceilingVisualHeight: 1200,
+    aimMinDeg: 10,
+    aimMaxDeg: 50
+  };
+
+  let root = null;
+  let canvas = null;
+  let ctx = null;
+
+  let raf = 0;
+  let last = 0;
+  let destroyed = false;
+
+  let scale = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  let mode = 'title';
+
+  let elapsed = 0;
+  let ceilingY = CFG.ceilingStartY;
+  let aimClock = 0;
+  let cooldown = 0;
+  let recoil = 0;
+
+  let hp = CFG.maxHP;
+
+  let bullets = [];
+  let sparks = [];
+  let heartBits = [];
+  let switches = [];
+
+  let shake = 0;
+  let crushClock = 0;
+  let fallSpeed = 0;
+  let personFall = 0;
+  let hitFlashTime = 0;
+  let fatalFlashTime = 0;
+
+  let spaceHeld = false;
+  let spaceArmed = false;
+
+  const person = {
+    x: 55,
+    y: H - 205,
+    w: 105,
+    h: 170
+  };
+
+  function reset(){
+
+    mode = 'play';
+
+    elapsed = 0;
+    ceilingY = CFG.ceilingStartY;
+
+    aimClock = 0;
+    cooldown = 0;
+    recoil = 0;
+
+    hp = CFG.maxHP;
+
+    bullets = [];
+    sparks = [];
+    heartBits = [];
+
+    shake = 0;
+    crushClock = 0;
+    fallSpeed = 0;
+    personFall = 0;
+    hitFlashTime = 0;
+    fatalFlashTime = 0;
+
+    /*
+      開始に使ったSpaceで発砲させない。
+      一度Spaceを離すまでは撃てない。
+    */
+    spaceArmed = false;
+
+    switches = [
+      { x: W * 0.22, pressed: false, press: 0 },
+      { x: W * 0.50, pressed: false, press: 0 },
+      { x: W * 0.78, pressed: false, press: 0 }
+    ];
+  }
+
+  function clamp(value,min,max){
+    return Math.max(min,Math.min(max,value));
+  }
+
+  function aimAngle(){
+
+    const cycle = Math.max(
+      0.2,
+      CFG.aimRoundTripSeconds
+    );
+
+    const half = cycle / 2;
+    const t = (aimClock % cycle) / half;
+
+    /*
+      0から1へ進み、次に1から0へ戻る。
+      端で減速せず等速で往復する。
+    */
+    const progress = t <= 1
+      ? t
+      : 2 - t;
+
+    const degrees =
+      CFG.aimMinDeg +
+      (
+        CFG.aimMaxDeg -
+        CFG.aimMinDeg
+      ) * progress;
+
+    return degrees * Math.PI / 180;
+  }
+
+  function gunPivot(){
+
+  const personScale = 1.4;
+
+  return {
+    x:
+      person.x +
+      37 * personScale,
+
+    y:
+      person.y +
+      personFall +
+      38 * personScale
+  };
+}
+
+  function fire(){
+
+    if(
+      mode !== 'play' ||
+      cooldown > 0
+    ){
+      return;
+    }
+
+    const angle = aimAngle();
+    const pivot = gunPivot();
+    const gunLength = 58 * 1.4;
+
+    const muzzleX =
+      pivot.x +
+      Math.cos(angle) * gunLength;
+
+    const muzzleY =
+      pivot.y -
+      Math.sin(angle) * gunLength;
+
+    bullets.push({
+      x: muzzleX,
+      y: muzzleY,
+      previousX: muzzleX,
+      previousY: muzzleY,
+
+      vx: Math.cos(angle) * CFG.bulletSpeed,
+      vy: -Math.sin(angle) * CFG.bulletSpeed,
+
+      radius: CFG.bulletRadius,
+      reflected: false,
+      age: 0
+    });
+
+    cooldown = CFG.shotCooldownSeconds;
+    recoil = 1;
+
+    spawnSparks(
+      muzzleX,
+      muzzleY,
+      Math.cos(angle),
+      -Math.sin(angle),
+      8,
+      'muzzle'
+    );
+  }
+
+  function spawnSparks(
+    x,
+    y,
+    directionX,
+    directionY,
+    count,
+    type
+  ){
+
+    for(let i = 0; i < count; i++){
+
+      const spread =
+        (Math.random() - 0.5) *
+        (
+          type === 'muzzle'
+            ? 1.1
+            : Math.PI * 2
+        );
+
+      const angle =
+        type === 'muzzle'
+          ? Math.atan2(
+              directionY,
+              directionX
+            ) + spread
+          : spread;
+
+      const speed =
+        (
+          type === 'muzzle'
+            ? 80
+            : 55
+        ) +
+        Math.random() *
+        (
+          type === 'muzzle'
+            ? 170
+            : 140
+        );
+
+      sparks.push({
+        x: x,
+        y: y,
+
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+
+        life: 0.18 + Math.random() * 0.28,
+        size: 1 + Math.random() * 2.4,
+
+        color:
+          type === 'heart'
+            ? '#ef334d'
+            : '#ffc35b'
+      });
+    }
+  }
+
+function heartCenter(){
+
+  const personScale = 1.4;
+
+  return {
+    x:
+      person.x +
+      35 * personScale,
+
+    /*
+      最後の「+ 12」が下へずらす量。
+    */
+    y:
+      person.y +
+      personFall +
+      54 * personScale +
+      20
+  };
+}
+
+  function circleHit(
+    bullet,
+    targetX,
+    targetY,
+    targetRadius
+  ){
+
+    const dx = bullet.x - targetX;
+    const dy = bullet.y - targetY;
+
+    const combinedRadius =
+      bullet.radius +
+      targetRadius;
+
+    return (
+      dx * dx +
+      dy * dy
+    ) <= (
+      combinedRadius *
+      combinedRadius
+    );
+  }
+
+  function pressSwitch(
+    switchObject,
+    bulletIndex
+  ){
+
+    switchObject.pressed = true;
+    switchObject.press = 0;
+
+    /*
+      スイッチに当たった弾は消える。
+    */
+    bullets.splice(bulletIndex,1);
+
+    spawnSparks(
+      switchObject.x,
+      ceilingY + CFG.ceilingHeight,
+      0,
+      1,
+      14,
+      'wall'
+    );
+
+    if(
+      switches.every(
+        switchItem => switchItem.pressed
+      )
+    ){
+      mode = 'clear';
+      spaceArmed = false;
+      recoil = 0;
+
+      /*
+        クリア時の金色の粒子。
+      */
+      for(let i = 0; i < 36; i++){
+
+        spawnSparks(
+          W * (
+            0.2 +
+            0.6 * Math.random()
+          ),
+          ceilingY + CFG.ceilingHeight,
+          0,
+          1,
+          1,
+          'wall'
+        );
+      }
+    }
+  }
+
+
+function damageHeart(bulletIndex){
+
+  /*
+    人物へ当たった弾を消す。
+  */
+  bullets.splice(
+    bulletIndex,
+    1
+  );
+
+  hp--;
+
+  /*
+    通常被弾時の赤い点滅。
+  */
+  hitFlashTime = 0.42;
+  shake = 8;
+
+  const heart =
+    heartCenter();
+
+  spawnSparks(
+    heart.x,
+    heart.y,
+    0,
+    0,
+    18,
+    'heart'
+  );
+
+  if(hp <= 0){
+
+    /*
+      すぐにゲームオーバーにせず、
+      激しい点滅状態へ移る。
+    */
+    mode = 'fatalFlash';
+
+    fatalFlashTime = 0;
+    hitFlashTime = 0;
+
+    spaceArmed = false;
+    personFall = 0;
+  }
+}
+
+
+function bulletHitsPerson(bullet){
+
+  const personScale = 1.4;
+
+  const personX =
+    person.x;
+
+  const personY =
+    person.y +
+    personFall;
+
+  /*
+    頭の当たり判定。
+  */
+  const headX =
+    personX +
+    35 * personScale;
+
+  const headY =
+    personY +
+    22 * personScale;
+
+  const headRadius =
+    19 * personScale;
+
+  const headDX =
+    bullet.x -
+    headX;
+
+  const headDY =
+    bullet.y -
+    headY;
+
+  const combinedHeadRadius =
+    bullet.radius +
+    headRadius;
+
+  const hitHead =
+    headDX * headDX +
+    headDY * headDY <=
+    combinedHeadRadius *
+    combinedHeadRadius;
+
+  /*
+    胴体の当たり判定。
+  */
+  const body = {
+    x:
+      personX +
+      13 * personScale,
+
+    y:
+      personY +
+      35 * personScale,
+
+    w:
+      44 * personScale,
+
+    h:
+      59 * personScale
+  };
+
+  /*
+    左脚の当たり判定。
+  */
+  const leftLeg = {
+    x:
+      personX +
+      12 * personScale,
+
+    y:
+      personY +
+      88 * personScale,
+
+    w:
+      23 * personScale,
+
+    h:
+      40 * personScale
+  };
+
+  /*
+    右脚の当たり判定。
+  */
+  const rightLeg = {
+    x:
+      personX +
+      38 * personScale,
+
+    y:
+      personY +
+      88 * personScale,
+
+    w:
+      23 * personScale,
+
+    h:
+      40 * personScale
+  };
+
+  function circleHitsRectangle(
+    circle,
+    rectangle
+  ){
+
+    const nearestX =
+      Math.max(
+        rectangle.x,
+        Math.min(
+          circle.x,
+          rectangle.x +
+          rectangle.w
+        )
+      );
+
+    const nearestY =
+      Math.max(
+        rectangle.y,
+        Math.min(
+          circle.y,
+          rectangle.y +
+          rectangle.h
+        )
+      );
+
+    const dx =
+      circle.x -
+      nearestX;
+
+    const dy =
+      circle.y -
+      nearestY;
+
+    return (
+      dx * dx +
+      dy * dy <=
+      circle.radius *
+      circle.radius
+    );
+  }
+
+  if(hitHead){
+    return true;
+  }
+
+  if(
+    circleHitsRectangle(
+      bullet,
+      body
+    )
+  ){
+    return true;
+  }
+
+  if(
+    circleHitsRectangle(
+      bullet,
+      leftLeg
+    )
+  ){
+    return true;
+  }
+
+  if(
+    circleHitsRectangle(
+      bullet,
+      rightLeg
+    )
+  ){
+    return true;
+  }
+
+  return false;
+}
+
+
+function updateBullets(
+  deltaTime,
+  allowHeartDamage
+){
+
+  /*
+    天井の下側が弾の反射面。
+    スイッチもこの高さに付いている。
+  */
+  const ceilingSurface =
+    ceilingY +
+    CFG.ceilingHeight;
+
+  for(
+    let bulletIndex = bullets.length - 1;
+    bulletIndex >= 0;
+    bulletIndex--
+  ){
+
+    const bullet =
+      bullets[bulletIndex];
+
+    bullet.previousX =
+      bullet.x;
+
+    bullet.previousY =
+      bullet.y;
+
+    bullet.age +=
+      deltaTime;
+
+    let remainingTime =
+      deltaTime;
+
+    let guard = 0;
+    let removed = false;
+
+    /*
+      弾の高速移動による
+      すり抜けを防ぐため、
+      移動を細かく分けて計算する。
+    */
+    while(
+      remainingTime > 0 &&
+      guard++ < 8 &&
+      !removed
+    ){
+
+      const step =
+        Math.min(
+          remainingTime,
+          0.004
+        );
+
+      bullet.x +=
+        bullet.vx *
+        step;
+
+      bullet.y +=
+        bullet.vy *
+        step;
+
+      remainingTime -=
+        step;
+
+      /*
+        スイッチの判定を、
+        壁や天井の反射より先に確認する。
+
+        この処理により、
+        半円の端をかすめた弾も反応する。
+      */
+      let hitSwitch = false;
+
+      for(
+        const switchObject
+        of switches
+      ){
+
+        /*
+          押されたスイッチは
+          天井へ引っ込んでいるため、
+          判定しない。
+        */
+        if(
+          switchObject.pressed
+        ){
+          continue;
+        }
+
+        /*
+          見た目より少し広い判定。
+
+          1.18を大きくすると
+          さらに当たりやすくなる。
+        */
+        const switchHitRadius =
+          CFG.switchRadius *
+          0.9;
+
+        if(
+          circleHit(
+            bullet,
+            switchObject.x,
+            ceilingSurface,
+            switchHitRadius
+          )
+        ){
+
+          pressSwitch(
+            switchObject,
+            bulletIndex
+          );
+
+          removed = true;
+          hitSwitch = true;
+
+          break;
+        }
+      }
+
+      /*
+        スイッチへ当たった弾は
+        pressSwitch()で削除済み。
+      */
+      if(hitSwitch){
+        break;
+      }
+
+      let bounced = false;
+
+      /*
+        左壁で反射。
+      */
+      if(
+        bullet.x -
+        bullet.radius <
+        0 &&
+        bullet.vx < 0
+      ){
+
+        bullet.x =
+          bullet.radius;
+
+        bullet.vx =
+          -bullet.vx;
+
+        bounced = true;
+      }
+
+      /*
+        右壁で反射。
+      */
+      if(
+        bullet.x +
+        bullet.radius >
+        W &&
+        bullet.vx > 0
+      ){
+
+        bullet.x =
+          W -
+          bullet.radius;
+
+        bullet.vx =
+          -bullet.vx;
+
+        bounced = true;
+      }
+
+      /*
+        スイッチ以外の天井部分で反射。
+      */
+      if(
+        bullet.y -
+        bullet.radius <
+        ceilingSurface &&
+        bullet.vy < 0
+      ){
+
+        bullet.y =
+          ceilingSurface +
+          bullet.radius;
+
+        bullet.vy =
+          -bullet.vy;
+
+        bounced = true;
+      }
+
+/*
+  壁または天井で反射した弾を
+  危険な弾へ切り替える。
+*/
+if(bounced){
+
+  bullet.reflected = true;
+
+  /*
+    反射地点に小さな火花を出す。
+  */
+  spawnSparks(
+    bullet.x,
+    bullet.y,
+    0,
+    0,
+    6,
+    'wall'
+  );
+}
+
+/*
+  一度以上反射した弾が人物へ当たると、
+  HPが1減って弾が消える。
+
+  発射直後の弾はreflectedがfalseなので、
+  銃口付近で自分に当たることはない。
+*/
+if(
+  allowHeartDamage &&
+  bullet.reflected &&
+  bulletHitsPerson(bullet)
+){
+
+  damageHeart(
+    bulletIndex
+  );
+
+  removed = true;
+
+  break;
+}    }
+
+    /*
+      下端では反射しない。
+      弾全体が画面外へ出たら削除する。
+    */
+    if(
+      !removed &&
+      bullet.y -
+      bullet.radius >
+      H + 12
+    ){
+
+      bullets.splice(
+        bulletIndex,
+        1
+      );
+    }
+  }
+}
+
+
+  function updateParticles(deltaTime){
+
+    for(
+      let i = sparks.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const spark = sparks[i];
+
+      spark.life -= deltaTime;
+
+      if(spark.life <= 0){
+
+        sparks.splice(i,1);
+        continue;
+      }
+
+      spark.vy += 260 * deltaTime;
+
+      spark.x += spark.vx * deltaTime;
+      spark.y += spark.vy * deltaTime;
+    }
+
+    for(
+      let i = heartBits.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const piece = heartBits[i];
+
+      piece.life -= deltaTime;
+
+      if(piece.life <= 0){
+
+        heartBits.splice(i,1);
+        continue;
+      }
+
+      piece.vy += 620 * deltaTime;
+
+      piece.x += piece.vx * deltaTime;
+      piece.y += piece.vy * deltaTime;
+
+      piece.rotation +=
+        piece.spin *
+        deltaTime;
+    }
+
+/*
+  通常被弾の赤い点滅時間を減らす。
+*/
+hitFlashTime = Math.max(
+  0,
+  hitFlashTime - deltaTime
+);
+
+
+    shake = Math.max(
+      0,
+      shake -
+      deltaTime * 18
+    );
+
+    recoil = Math.max(
+      0,
+      recoil -
+      deltaTime * 8
+    );
+
+    for(const switchObject of switches){
+
+      switchObject.press = Math.min(
+        1,
+        switchObject.press +
+        deltaTime * 5
+      );
+    }
+  }
+
+  function beginCrush(){
+
+    mode = 'crushWarn';
+    crushClock = 0;
+    spaceArmed = false;
+  }
+
+  function update(deltaTime){
+
+    updateParticles(deltaTime);
+
+    if(mode === 'play'){
+
+      elapsed += deltaTime;
+      aimClock += deltaTime;
+
+      cooldown = Math.max(
+        0,
+        cooldown - deltaTime
+      );
+
+      const ceilingProgress = clamp(
+        elapsed /
+        Math.max(
+          0.1,
+          CFG.ceilingFallSeconds
+        ),
+        0,
+        1
+      );
+
+      ceilingY =
+        CFG.ceilingStartY +
+        (
+          CFG.dangerLineY -
+          CFG.ceilingHeight -
+          CFG.ceilingStartY
+        ) *
+        ceilingProgress;
+
+      updateBullets(
+        deltaTime,
+        true
+      );
+
+      if(
+        mode === 'play' &&
+        ceilingProgress >= 1
+      ){
+        beginCrush();
+      }
+
+    }else if(mode === 'clear'){
+
+      /*
+        クリア後も残っている弾を飛ばす。
+        ハートには当たらない。
+      */
+      updateBullets(
+        deltaTime,
+        false
+      );
+
+}else if(mode === 'fatalFlash'){
+
+  /*
+    死亡確定後の点滅時間。
+  */
+  fatalFlashTime +=
+    deltaTime;
+
+  /*
+    点滅中は弾を動かすが、
+    人物への追加ダメージは無効。
+  */
+  updateBullets(
+    deltaTime,
+    false
+  );
+
+  /*
+    点滅中は画面を少し揺らす。
+  */
+  shake =
+    4 +
+    fatalFlashTime * 8;
+
+  /*
+    約0.9秒点滅した後、
+    ハートを割って人物を落下させる。
+  */
+  if(fatalFlashTime >= 0.9){
+
+    mode = 'heartDead';
+    personFall = 0;
+    shake = 12;
+
+    const heart =
+      heartCenter();
+
+    /*
+      割れたハートの破片。
+    */
+    for(let i = 0; i < 22; i++){
+
+      heartBits.push({
+        x: heart.x,
+        y: heart.y,
+
+        vx:
+          (
+            Math.random() -
+            0.5
+          ) * 260,
+
+        vy:
+          -60 -
+          Math.random() * 220,
+
+        life:
+          0.7 +
+          Math.random() * 0.7,
+
+        size:
+          3 +
+          Math.random() * 7,
+
+        rotation:
+          Math.random() *
+          Math.PI * 2,
+
+        spin:
+          (
+            Math.random() -
+            0.5
+          ) * 10
+      });
+    }
+  }
+
+    }else if(mode === 'heartDead'){
+
+      updateBullets(
+        deltaTime,
+        false
+      );
+
+      /*
+        人物が倒れて画面下へ消える。
+      */
+      personFall +=
+        340 *
+        deltaTime;
+
+      if(
+        person.y +
+        personFall >
+        H + 130
+      ){
+        mode = 'gameOver';
+        spaceArmed = false;
+      }
+
+    }else if(mode === 'crushWarn'){
+
+      crushClock += deltaTime;
+
+      /*
+        1秒間振動した後、
+        一気に天井を落とす。
+      */
+      if(crushClock >= 2){
+
+        mode = 'crushing';
+        fallSpeed = 0;
+      }
+
+    }else if(mode === 'crushing'){
+
+      fallSpeed +=
+        2800 *
+        deltaTime;
+
+      ceilingY +=
+        fallSpeed *
+        deltaTime;
+
+      if(
+  ceilingY +
+  CFG.ceilingHeight >=
+  H + 25
+){
+  /*
+    天井の下端を画面下より25だけ深く落とす。
+  */
+  ceilingY =
+    H +
+    25 -
+    CFG.ceilingHeight;
+
+  shake = 18;
+  mode = 'gameOver';
+  spaceArmed = false;
+}    }
+  }
+
+function drawBackground(){
+
+  /*
+    上側は明るい青灰色、
+    下側は少し暗い工場内の色にする。
+  */
+  const gradient =
+    ctx.createLinearGradient(
+      0,
+      0,
+      0,
+      H
+    );
+
+  gradient.addColorStop(
+    0,
+    '#687985'
+  );
+
+  gradient.addColorStop(
+    0.52,
+    '#44535e'
+  );
+
+  gradient.addColorStop(
+    1,
+    '#29343c'
+  );
+
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0,0,W,H);
+
+  /*
+    大きな壁パネル。
+  */
+  ctx.fillStyle =
+    'rgba(225,238,244,.075)';
+
+  for(
+    let row = 0;
+    row < 5;
+    row++
+  ){
+    for(
+      let col = 0;
+      col < 4;
+      col++
+    ){
+      const panelX =
+        18 +
+        col * 146;
+
+      const panelY =
+        28 +
+        row * 142;
+
+      ctx.fillRect(
+        panelX,
+        panelY,
+        126,
+        120
+      );
+    }
+  }
+
+  /*
+    壁パネルの継ぎ目。
+  */
+  ctx.strokeStyle =
+    'rgba(20,31,38,.24)';
+
+  ctx.lineWidth = 3;
+
+  for(
+    let x = 0;
+    x <= W;
+    x += 150
+  ){
+    ctx.beginPath();
+    ctx.moveTo(x,0);
+    ctx.lineTo(x,H);
+    ctx.stroke();
+  }
+
+  for(
+    let y = 0;
+    y <= H;
+    y += 142
+  ){
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
+    ctx.stroke();
+  }
+
+  /*
+    パネル上部の反射光。
+  */
+  ctx.strokeStyle =
+    'rgba(239,249,252,.13)';
+
+  ctx.lineWidth = 2;
+
+  for(
+    let y = 3;
+    y < H;
+    y += 142
+  ){
+    ctx.beginPath();
+    ctx.moveTo(0,y);
+    ctx.lineTo(W,y);
+    ctx.stroke();
+  }
+
+  /*
+    床。
+  */
+  ctx.fillStyle = '#273037';
+
+  ctx.fillRect(
+    0,
+    H - 72,
+    W,
+    72
+  );
+
+  /*
+    床の上端。
+  */
+  ctx.fillStyle = '#75848c';
+
+  ctx.fillRect(
+    0,
+    H - 72,
+    W,
+    6
+  );
+
+  /*
+    床の警告模様。
+  */
+  ctx.fillStyle =
+    'rgba(209,161,59,.18)';
+
+  for(
+    let x = -40;
+    x < W + 40;
+    x += 55
+  ){
+    ctx.save();
+
+    ctx.translate(
+      x,
+      H - 34
+    );
+
+    ctx.rotate(-0.55);
+
+    ctx.fillRect(
+      -7,
+      -26,
+      14,
+      52
+    );
+
+    ctx.restore();
+  }
+}
+
+  function drawDangerLine(){
+
+    ctx.save();
+
+    ctx.setLineDash([12,11]);
+
+    ctx.strokeStyle =
+      'rgba(255,69,54,.75)';
+
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+    ctx.moveTo(
+      28,
+      CFG.dangerLineY
+    );
+    ctx.lineTo(
+      W - 28,
+      CFG.dangerLineY
+    );
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = '#ff4b3e';
+    ctx.font = 'bold 22px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.fillText(
+      '!',
+      15,
+      CFG.dangerLineY
+    );
+
+    ctx.fillText(
+      '!',
+      W - 15,
+      CFG.dangerLineY
+    );
+
+    ctx.restore();
+  }
+
+  function drawCeiling(){
+
+    const jitter =
+      mode === 'crushWarn'
+        ? (
+            Math.random() -
+            0.5
+          ) * 8
+        : 0;
+
+    ctx.save();
+    ctx.translate(jitter,0);
+
+   ctx.fillStyle = '#4a4d53';
+
+      ctx.fillRect(
+     0,
+     ceilingY + CFG.ceilingHeight - CFG.ceilingVisualHeight,
+     W,
+     CFG.ceilingVisualHeight
+   );
+
+    ctx.fillStyle = '#72767d';
+
+    ctx.fillRect(
+      0,
+      ceilingY +
+      CFG.ceilingHeight -
+      7,
+      W,
+      7
+    );
+
+    ctx.strokeStyle = '#24262a';
+    ctx.lineWidth = 3;
+
+const visualCeilingTop =
+  ceilingY +
+  CFG.ceilingHeight -
+  CFG.ceilingVisualHeight;
+
+for(
+  let x = 18;
+  x < W;
+  x += 55
+){
+  ctx.beginPath();
+
+  ctx.moveTo(
+    x,
+    visualCeilingTop + 8
+  );
+
+  ctx.lineTo(
+    x + 22,
+    ceilingY +
+    CFG.ceilingHeight -
+    8
+  );
+
+  ctx.stroke();
+}
+
+    for(const switchObject of switches){
+
+      drawSwitch(switchObject);
+    }
+
+    ctx.restore();
+  }
+
+  function drawSwitch(switchObject){
+
+    const baseY =
+      ceilingY +
+      CFG.ceilingHeight;
+
+    if(switchObject.pressed){
+
+      /*
+        押された後は半円を収納する。
+        天井表面に緑色のランプだけ残す。
+      */
+      ctx.fillStyle = '#153d25';
+
+      ctx.beginPath();
+
+      ctx.arc(
+        switchObject.x,
+        baseY - 5,
+        CFG.switchRadius * 0.42,
+        Math.PI,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+
+      ctx.fillStyle = '#4eff83';
+      ctx.shadowColor = '#4eff83';
+      ctx.shadowBlur = 12;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        switchObject.x,
+        baseY - 5,
+        6,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+      return;
+    }
+
+    /*
+      未作動の赤い半円スイッチ。
+    */
+    ctx.fillStyle = '#631b22';
+    ctx.strokeStyle = '#da5360';
+    ctx.lineWidth = 3;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      switchObject.x,
+      baseY,
+      CFG.switchRadius,
+      0,
+      Math.PI
+    );
+
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = '#d73d4d';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      switchObject.x,
+      baseY + 3,
+      CFG.switchRadius * 0.48,
+      0,
+      Math.PI
+    );
+
+    ctx.closePath();
+    ctx.fill();
+  }
+
+
+  function drawPerson(){
+
+  const personScale = 1.4;
+
+  const y =
+    person.y +
+    personFall;
+
+  const angle =
+    aimAngle();
+
+  /*
+    銃を撃った直後だけ、
+    腕と銃を少し後ろへ下げる。
+  */
+  const kick =
+    recoil * 7;
+
+  ctx.save();
+
+/*
+  通常被弾時は赤く点滅。
+
+  HPが0になった場合は、
+  赤と白を交互に強く点滅させる。
+*/
+if(mode === 'fatalFlash'){
+
+  const fatalBlink =
+    Math.floor(
+      fatalFlashTime * 12
+    ) % 2;
+
+  ctx.filter =
+    fatalBlink === 0
+      ? 'brightness(2.8) saturate(4)'
+      : 'sepia(1) saturate(9) hue-rotate(-35deg) brightness(1.5)';
+
+}else if(hitFlashTime > 0){
+
+  const hitBlink =
+    Math.floor(
+      hitFlashTime * 16
+    ) % 2;
+
+  if(hitBlink === 0){
+
+    ctx.filter =
+      'sepia(1) saturate(8) hue-rotate(-35deg) brightness(1.35)';
+  }
+}
+
+  /*
+    人物の左上を基準に拡大する。
+  */
+  ctx.translate(
+    person.x,
+    y
+  );
+
+  ctx.scale(
+    personScale,
+    personScale
+  );
+
+  /*
+    後ろ側の脚。
+  */
+  ctx.fillStyle = '#435966';
+
+  ctx.fillRect(
+    39,
+    88,
+    15,
+    37
+  );
+
+  /*
+    後ろ側の靴。
+  */
+  ctx.fillStyle = '#202c32';
+
+  ctx.fillRect(
+    39,
+    119,
+    21,
+    8
+  );
+
+  /*
+    前側の脚。
+  */
+  ctx.fillStyle = '#58717e';
+
+  ctx.fillRect(
+    17,
+    88,
+    16,
+    37
+  );
+
+  /*
+    前側の靴。
+  */
+  ctx.fillStyle = '#26343b';
+
+  ctx.fillRect(
+    12,
+    119,
+    22,
+    8
+  );
+
+  /*
+    胴体。
+
+    明るめの青灰色の作業服にして、
+    背景から見分けやすくする。
+  */
+  ctx.fillStyle = '#87a5b2';
+  ctx.strokeStyle = '#30434c';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+
+  ctx.moveTo(20,38);
+  ctx.lineTo(49,38);
+  ctx.lineTo(56,52);
+  ctx.lineTo(52,92);
+  ctx.lineTo(18,92);
+  ctx.lineTo(14,52);
+
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  /*
+    胸の暗い部分。
+
+    この上にハートが表示される。
+  */
+  ctx.fillStyle = '#354b55';
+
+  ctx.beginPath();
+
+  ctx.roundRect(
+    22,
+    48,
+    26,
+    29,
+    5
+  );
+
+  ctx.fill();
+
+  /*
+    肩の保護板。
+  */
+  ctx.fillStyle = '#a8bec7';
+  ctx.strokeStyle = '#415761';
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+  ctx.roundRect(
+    10,
+    40,
+    19,
+    14,
+    5
+  );
+  ctx.fill();
+  ctx.stroke();
+
+  /*
+    腰のベルト。
+  */
+  ctx.fillStyle = '#293a42';
+
+  ctx.fillRect(
+    18,
+    82,
+    34,
+    8
+  );
+
+  /*
+    ベルト中央の金具。
+  */
+  ctx.fillStyle = '#c4d1d6';
+
+  ctx.fillRect(
+    32,
+    83,
+    7,
+    6
+  );
+
+  /*
+    ヘルメットの首部分。
+  */
+  ctx.fillStyle = '#334750';
+
+  ctx.fillRect(
+    28,
+    31,
+    14,
+    9
+  );
+
+  /*
+    ヘルメット本体。
+
+    顔を細かく描かず、
+    単純な機械的シルエットにする。
+  */
+  ctx.fillStyle = '#76929e';
+  ctx.strokeStyle = '#263941';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+
+  ctx.arc(
+    35,
+    21,
+    19,
+    Math.PI,
+    Math.PI * 2
+  );
+
+  ctx.lineTo(
+    54,
+    29
+  );
+
+  ctx.quadraticCurveTo(
+    51,
+    37,
+    42,
+    38
+  );
+
+  ctx.lineTo(
+    25,
+    38
+  );
+
+  ctx.quadraticCurveTo(
+    16,
+    34,
+    16,
+    25
+  );
+
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  /*
+    ヘルメット上部の明るい面。
+  */
+  ctx.fillStyle = '#b8cbd2';
+
+  ctx.beginPath();
+
+  ctx.arc(
+    35,
+    20,
+    14,
+    Math.PI,
+    Math.PI * 1.82
+  );
+
+  ctx.lineTo(
+    22,
+    20
+  );
+
+  ctx.closePath();
+  ctx.fill();
+
+  /*
+    顔の代わりになる暗いバイザー。
+  */
+  ctx.fillStyle = '#1c2a30';
+
+  ctx.beginPath();
+
+  ctx.roundRect(
+    35,
+    20,
+    20,
+    11,
+    4
+  );
+
+  ctx.fill();
+
+  /*
+    バイザーの小さな反射。
+  */
+  ctx.fillStyle = 'rgba(160,225,240,.48)';
+
+  ctx.fillRect(
+    39,
+    22,
+    11,
+    2
+  );
+
+  /*
+    後ろ側の腕。
+  */
+  ctx.save();
+
+  ctx.translate(
+    30,
+    47
+  );
+
+  ctx.rotate(-angle);
+
+  ctx.translate(
+    -kick,
+    0
+  );
+
+  ctx.strokeStyle = '#536f7c';
+  ctx.lineWidth = 13;
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(-5,2);
+  ctx.lineTo(29,2);
+  ctx.stroke();
+
+  ctx.restore();
+
+  /*
+    前側の腕と拳銃。
+  */
+  ctx.save();
+
+  ctx.translate(
+    37,
+    38
+  );
+
+  ctx.rotate(-angle);
+
+  ctx.translate(
+    -kick,
+    0
+  );
+
+  /*
+    腕。
+  */
+  ctx.strokeStyle = '#91abb6';
+  ctx.lineWidth = 12;
+  ctx.lineCap = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(-8,0);
+  ctx.lineTo(35,0);
+  ctx.stroke();
+
+  /*
+    手袋。
+  */
+  ctx.fillStyle = '#26373f';
+
+  ctx.beginPath();
+  ctx.arc(
+    34,
+    0,
+    7,
+    0,
+    Math.PI * 2
+  );
+  ctx.fill();
+
+  /*
+    拳銃本体。
+  */
+  ctx.fillStyle = '#77858b';
+  ctx.strokeStyle = '#20282c';
+  ctx.lineWidth = 2;
+
+  ctx.beginPath();
+
+  ctx.roundRect(
+    31,
+    -7,
+    34,
+    13,
+    3
+  );
+
+  ctx.fill();
+  ctx.stroke();
+
+  /*
+    銃身上側のハイライト。
+  */
+  ctx.fillStyle = '#bdc8cc';
+
+  ctx.fillRect(
+    35,
+    -5,
+    24,
+    3
+  );
+
+  /*
+    銃口。
+  */
+  ctx.fillStyle = '#151b1e';
+
+  ctx.fillRect(
+    60,
+    -4,
+    6,
+    8
+  );
+
+  /*
+    グリップ。
+  */
+  ctx.fillStyle = '#354146';
+  ctx.strokeStyle = '#192023';
+  ctx.lineWidth = 1.5;
+
+  ctx.beginPath();
+
+  ctx.moveTo(41,5);
+  ctx.lineTo(53,5);
+  ctx.lineTo(50,22);
+  ctx.lineTo(40,20);
+
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.restore();
+
+  /*
+    人物用の拡大描画を終了する。
+  */
+  ctx.restore();
+
+  /*
+    ハートの座標はheartCenter()側で
+    拡大後の位置を計算しているため、
+    通常座標で描く。
+  */
+  drawHeart();
+}
+
+
+  function heartPath(x,y,size){
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x,
+      y + size * 0.32
+    );
+
+    ctx.bezierCurveTo(
+      x - size * 0.58,
+      y - size * 0.08,
+
+      x - size * 0.5,
+      y - size * 0.62,
+
+      x,
+      y - size * 0.33
+    );
+
+    ctx.bezierCurveTo(
+      x + size * 0.5,
+      y - size * 0.62,
+
+      x + size * 0.58,
+      y - size * 0.08,
+
+      x,
+      y + size * 0.32
+    );
+
+    ctx.closePath();
+  }
+
+  function drawHeart(){
+
+    if(hp <= 0 && mode !== 'fatalFlash'
+    ){
+      return;
+    }
+
+    const heart = heartCenter();
+
+    const hpRatio =
+      hp /
+      CFG.maxHP;
+
+    const danger =
+      1 -
+      hpRatio;
+
+    /*
+      HPが少ないほど鼓動と発光が強くなる。
+    */
+    const pulse =
+      1 +
+      danger *
+      0.08 *
+      Math.sin(
+        performance.now() *
+        0.012
+      );
+
+    const size =
+      CFG.heartSize *
+      pulse;
+
+    /*
+      最初は落ち着いた赤。
+      HPが減るほど明るい赤へ変化する。
+    */
+    const red =
+      Math.round(
+        135 +
+        danger * 120
+      );
+
+    const green =
+      Math.round(
+        32 +
+        danger * 28
+      );
+
+    const blue =
+      Math.round(
+        45 +
+        danger * 18
+      );
+
+    ctx.save();
+
+    ctx.shadowColor =
+      'rgb(' +
+      red + ',' +
+      green + ',' +
+      blue + ')';
+
+    ctx.shadowBlur =
+      5 +
+      danger * 17;
+
+    ctx.fillStyle =
+      'rgb(' +
+      red + ',' +
+      green + ',' +
+      blue + ')';
+
+    heartPath(
+      heart.x,
+      heart.y,
+      size
+    );
+
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    /*
+      HPが減るほどひびを増やす。
+    */
+    ctx.strokeStyle =
+      'rgba(35,0,6,.85)';
+
+    ctx.lineWidth = 2;
+
+    if(
+      hp <=
+      CFG.maxHP * 0.75
+    ){
+      ctx.beginPath();
+
+      ctx.moveTo(
+        heart.x - 2,
+        heart.y -
+        size * 0.27
+      );
+
+      ctx.lineTo(
+        heart.x + 3,
+        heart.y -
+        size * 0.02
+      );
+
+      ctx.lineTo(
+        heart.x - 4,
+        heart.y +
+        size * 0.14
+      );
+
+      ctx.stroke();
+    }
+
+    if(
+      hp <=
+      CFG.maxHP * 0.45
+    ){
+      ctx.beginPath();
+
+      ctx.moveTo(
+        heart.x + 3,
+        heart.y -
+        size * 0.02
+      );
+
+      ctx.lineTo(
+        heart.x +
+        size * 0.24,
+        heart.y +
+        size * 0.03
+      );
+
+      ctx.lineTo(
+        heart.x +
+        size * 0.08,
+        heart.y +
+        size * 0.24
+      );
+
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+  function drawBullets(){
+
+    for(const bullet of bullets){
+
+      ctx.save();
+
+      /*
+        短い黄銅色の軌跡。
+        強く発光させず、レーザーには見せない。
+      */
+      ctx.strokeStyle =
+        'rgba(214,166,77,.38)';
+
+      ctx.lineWidth = 3;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        bullet.x -
+        bullet.vx /
+        CFG.bulletSpeed *
+        18,
+
+        bullet.y -
+        bullet.vy /
+        CFG.bulletSpeed *
+        18
+      );
+
+      ctx.lineTo(
+        bullet.x,
+        bullet.y
+      );
+
+      ctx.stroke();
+
+      ctx.fillStyle = '#c99a43';
+      ctx.strokeStyle = '#5b421d';
+      ctx.lineWidth = 1.5;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        bullet.x,
+        bullet.y,
+        bullet.radius,
+        0,
+        Math.PI * 2
+      );
+
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function drawParticles(){
+
+    for(const spark of sparks){
+
+      ctx.save();
+
+      ctx.globalAlpha = clamp(
+        spark.life * 4,
+        0,
+        1
+      );
+
+      ctx.fillStyle =
+        spark.color;
+
+      ctx.fillRect(
+        spark.x,
+        spark.y,
+        spark.size,
+        spark.size
+      );
+
+      ctx.restore();
+    }
+
+    for(const piece of heartBits){
+
+      ctx.save();
+
+      ctx.globalAlpha = clamp(
+        piece.life,
+        0,
+        1
+      );
+
+      ctx.translate(
+        piece.x,
+        piece.y
+      );
+
+      ctx.rotate(
+        piece.rotation
+      );
+
+      ctx.fillStyle = '#e7354d';
+
+      ctx.fillRect(
+        -piece.size / 2,
+        -piece.size / 3,
+        piece.size,
+        piece.size * 0.7
+      );
+
+      ctx.restore();
+    }
+  }
+
+
+function drawShotGauge(){
+
+  /*
+    プレイ中だけ表示する。
+  */
+  if(mode !== 'play'){
+    return;
+  }
+
+  /*
+    クールタイムの回復率。
+    発射直後は0、発射可能なら1。
+  */
+  const recovery =
+    CFG.shotCooldownSeconds <= 0
+      ? 1
+      : clamp(
+          1 -
+          cooldown /
+          CFG.shotCooldownSeconds,
+          0,
+          1
+        );
+
+  /*
+    人物の右側にゲージを固定する。
+  */
+  const gaugeX =
+    person.x + 120;
+
+  const gaugeY =
+    person.y + 108;
+
+  const gaugeWidth = 105;
+  const gaugeHeight = 12;
+
+  ctx.save();
+
+  /*
+    ゲージの暗い背景。
+  */
+  ctx.fillStyle =
+    'rgba(15,20,23,.82)';
+
+  ctx.fillRect(
+    gaugeX,
+    gaugeY,
+    gaugeWidth,
+    gaugeHeight
+  );
+
+  /*
+    回復中のゲージ。
+    待機中は黄橙色、発射可能になると緑色。
+  */
+  ctx.fillStyle =
+    recovery >= 1
+      ? '#d94b00'
+      : '#dda43b';
+
+  ctx.fillRect(
+    gaugeX + 2,
+    gaugeY + 2,
+    (
+      gaugeWidth - 4
+    ) * recovery,
+    gaugeHeight - 4
+  );
+
+  /*
+    枠線。
+  */
+  ctx.strokeStyle =
+    recovery >= 1
+      ? '#ffd09a'
+      : 'rgba(255,236,190,.8)';
+
+  ctx.lineWidth = 2;
+
+  ctx.strokeRect(
+    gaugeX,
+    gaugeY,
+    gaugeWidth,
+    gaugeHeight
+  );
+
+  ctx.restore();
+}
+
+function drawHP(){
+
+  ctx.save();
+
+  /*
+    HP表示の背景。
+  */
+  ctx.fillStyle = 'rgba(20,25,29,.86)';
+
+  ctx.fillRect(
+    18,
+    H - 62,
+    128,
+    42
+  );
+
+  /*
+    HP表示の枠線。
+  */
+  ctx.strokeStyle = 'rgba(230,239,243,.7)';
+  ctx.lineWidth = 2;
+
+  ctx.strokeRect(
+    18,
+    H - 62,
+    128,
+    42
+  );
+
+  /*
+    HPという文字。
+  */
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 21px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillText(
+    'HP',
+    31,
+    H - 41
+  );
+
+  /*
+    HPを5個の四角で表示する。
+  */
+  const blockWidth = 20;
+  const blockHeight = 17;
+  const blockGap = 5;
+  const startX = 66;
+
+  for(let i = 0; i < CFG.maxHP; i++){
+
+    /*
+      残っているHPは赤。
+      減ったHPは暗い灰色。
+    */
+    if(i < hp){
+
+      const danger =
+        1 -
+        hp / CFG.maxHP;
+
+      const red =
+        Math.round(
+          185 +
+          danger * 70
+        );
+
+      ctx.fillStyle =
+        'rgb(' +
+        red +
+        ',42,58)';
+
+    }else{
+
+      ctx.fillStyle = '#3b3f43';
+    }
+
+    ctx.fillRect(
+      startX +
+      i *
+      (
+        blockWidth +
+        blockGap
+      ),
+      H - 50,
+      blockWidth,
+      blockHeight
+    );
+
+    /*
+      各HPブロックの枠線。
+    */
+    ctx.strokeStyle = 'rgba(255,255,255,.22)';
+    ctx.lineWidth = 1;
+
+    ctx.strokeRect(
+      startX +
+      i *
+      (
+        blockWidth +
+        blockGap
+      ),
+      H - 50,
+      blockWidth,
+      blockHeight
+    );
+  }
+
+  ctx.restore();
+}
+
+  function drawTitle(){
+
+    drawBackground();
+
+    ctx.fillStyle =
+      'rgba(0,0,0,.48)';
+
+    ctx.fillRect(0,0,W,H);
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    ctx.fillStyle = '#f1f1f1';
+    ctx.font = 'bold 47px sans-serif';
+
+    ctx.fillText(
+      '天井が落ちてくる仕掛け',
+      W / 2,
+      205
+    );
+
+    ctx.fillStyle = '#d6bd8a';
+    ctx.font = 'bold 24px sans-serif';
+
+    ctx.fillText(
+      'SPACE　撃つ',
+      W / 2,
+      330
+    );
+
+    ctx.fillStyle = '#bfc2c7';
+    ctx.font = '20px sans-serif';
+
+    ctx.fillText(
+      '跳弾で3つのスイッチを押せ',
+      W / 2,
+      390
+    );
+
+    ctx.fillText(
+      '自分に当てないよう注意！',
+      W / 2,
+      425
+    );
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 28px sans-serif';
+
+    ctx.fillText(
+      'SPACEで開始',
+      W / 2,
+      550
+    );
+  }
+
+  function drawClear(){
+
+  ctx.save();
+
+  const pulse =
+    1 +
+    0.025 *
+    Math.sin(
+      performance.now() *
+      0.006
+    );
+
+  ctx.translate(
+    W / 2,
+    350
+  );
+
+  ctx.scale(
+    pulse,
+    pulse
+  );
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  /*
+    serifをやめ、角が安定しやすい
+    sans-serifを使用する。
+  */
+  ctx.font =
+    '900 92px sans-serif';
+
+  /*
+    角の接続を丸くする。
+    Eなどの角から棘が出にくくなる。
+  */
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  /*
+    マイターが極端に伸びることも抑える。
+  */
+  ctx.miterLimit = 2;
+
+  /*
+    黒い外縁。
+    前より少し細くする。
+  */
+  ctx.lineWidth = 9;
+
+  ctx.strokeStyle =
+    'rgba(55,29,0,.88)';
+
+  ctx.strokeText(
+    'CLEAR',
+    0,
+    0
+  );
+
+  /*
+    金色の内側の縁。
+  */
+  ctx.lineWidth = 4;
+
+  ctx.strokeStyle =
+    '#f0a72b';
+
+  ctx.strokeText(
+    'CLEAR',
+    0,
+    0
+  );
+
+  /*
+    文字本体。
+  */
+  ctx.fillStyle =
+    '#fff3b0';
+
+  ctx.shadowColor =
+    '#ffd34e';
+
+  ctx.shadowBlur = 24;
+
+  ctx.fillText(
+    'CLEAR',
+    0,
+    0
+  );
+
+  /*
+    文字上部の白いハイライト。
+  */
+  ctx.globalAlpha = 0.42;
+
+  ctx.fillStyle = '#ffffff';
+
+  ctx.save();
+
+  ctx.beginPath();
+
+  ctx.rect(
+    -220,
+    -43,
+    440,
+    28
+  );
+
+  ctx.clip();
+
+  ctx.fillText(
+    'CLEAR',
+    0,
+    0
+  );
+
+  ctx.restore();
+
+  ctx.restore();
+
+  ctx.save();
+
+  ctx.shadowBlur = 0;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 25px sans-serif';
+
+  ctx.fillText(
+    'SPACEでもう一度',
+    W / 2,
+    475
+  );
+
+  ctx.restore();
+}
+
+  function drawGameOver(){
+
+    ctx.fillStyle =
+      'rgba(0,0,0,.56)';
+
+    ctx.fillRect(0,0,W,H);
+
+    ctx.textAlign = 'center';
+
+    ctx.fillStyle = '#e8e8e8';
+    ctx.font = 'bold 58px sans-serif';
+
+    ctx.fillText(
+      'GAME OVER',
+      W / 2,
+      350
+    );
+
+    ctx.font = 'bold 25px sans-serif';
+
+    ctx.fillText(
+      'SPACEでもう一度',
+      W / 2,
+      435
+    );
+  }
+
+  function render(){
+
+    ctx.setTransform(
+      scale,
+      0,
+      0,
+      scale,
+      offsetX,
+      offsetY
+    );
+
+    /*
+      Canvas全体を消去する。
+    */
+    ctx.clearRect(
+      -offsetX / scale,
+      -offsetY / scale,
+      canvas.width / scale,
+      canvas.height / scale
+    );
+
+    ctx.save();
+
+    /*
+      ゲーム画面外の黒い帯に
+      弾や粒子を描画しない。
+    */
+    ctx.beginPath();
+    ctx.rect(0,0,W,H);
+    ctx.clip();
+
+    if(shake > 0){
+
+      ctx.translate(
+        (
+          Math.random() -
+          0.5
+        ) * shake,
+
+        (
+          Math.random() -
+          0.5
+        ) * shake
+      );
+    }
+
+    if(mode === 'title'){
+
+      drawTitle();
+      ctx.restore();
+      return;
+    }
+
+   drawBackground();
+   drawDangerLine();
+   drawPerson();
+   drawShotGauge();
+   drawBullets();
+   drawParticles();
+   drawCeiling();
+   drawHP();
+
+    if(mode === 'clear'){
+      drawClear();
+    }
+
+    if(mode === 'gameOver'){
+      drawGameOver();
+    }
+
+    ctx.restore();
+  }
+
+  function resize(){
+
+    if(
+      !root ||
+      !canvas
+    ){
+      return;
+    }
+
+    const rect =
+      root.getBoundingClientRect();
+
+    const pixelRatio =
+      Math.min(
+        window.devicePixelRatio ||
+        1,
+        2
+      );
+
+    canvas.width =
+      Math.max(
+        1,
+        Math.round(
+          rect.width *
+          pixelRatio
+        )
+      );
+
+    canvas.height =
+      Math.max(
+        1,
+        Math.round(
+          rect.height *
+          pixelRatio
+        )
+      );
+
+    scale = Math.min(
+      canvas.width / W,
+      canvas.height / H
+    );
+
+    offsetX =
+      (
+        canvas.width -
+        W * scale
+      ) / 2;
+
+    offsetY =
+      (
+        canvas.height -
+        H * scale
+      ) / 2;
+  }
+
+  function keyDown(event){
+
+    if(
+      ![
+        'Space',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown'
+      ].includes(event.code)
+    ){
+      return;
+    }
+
+    event.preventDefault();
+
+    /*
+      矢印キーは使用しない。
+      Enterも一切処理しない。
+    */
+    if(
+      event.code !== 'Space' ||
+      event.repeat
+    ){
+      return;
+    }
+
+    spaceHeld = true;
+
+    if(mode === 'title'){
+
+      reset();
+      return;
+    }
+
+    if(
+      mode === 'gameOver' ||
+      mode === 'clear'
+    ){
+
+      if(spaceArmed){
+        reset();
+      }
+
+      return;
+    }
+
+    if(
+      mode === 'play' &&
+      spaceArmed
+    ){
+      fire();
+    }
+  }
+
+  function keyUp(event){
+
+    if(
+      ![
+        'Space',
+        'ArrowLeft',
+        'ArrowRight',
+        'ArrowUp',
+        'ArrowDown'
+      ].includes(event.code)
+    ){
+      return;
+    }
+
+    event.preventDefault();
+
+    if(event.code === 'Space'){
+
+      spaceHeld = false;
+
+      /*
+        Spaceを一度離した後から
+        射撃や再挑戦を許可する。
+      */
+      spaceArmed = true;
+    }
+  }
+
+  function pointerDown(){
+
+    if(root){
+      root.focus();
+    }
+  }
+
+  function loop(timestamp){
+
+    if(destroyed){
+      return;
+    }
+
+    const deltaTime =
+      last
+        ? Math.min(
+            0.033,
+            (
+              timestamp -
+              last
+            ) / 1000
+          )
+        : 0;
+
+    last = timestamp;
+
+    update(deltaTime);
+    render();
+
+    raf =
+      requestAnimationFrame(loop);
+  }
+
+  function mount(target){
+
+    destroyed = false;
+    last = 0;
+
+    root =
+      document.createElement('div');
+
+    root.className = 'ctg-root';
+    root.tabIndex = 0;
+
+    root.setAttribute(
+      'aria-label',
+      '天井が落ちてくる仕掛け'
+    );
+
+    canvas =
+      document.createElement('canvas');
+
+    const hint =
+      document.createElement('div');
+
+    hint.className = 'ctg-focus';
+    hint.textContent =
+      '画面をクリックして操作';
+
+    root.appendChild(canvas);
+    root.appendChild(hint);
+
+    target.appendChild(root);
+
+    ctx =
+      canvas.getContext('2d');
+
+    switches = [
+      { x: W * 0.22, pressed: false, press: 0 },
+      { x: W * 0.50, pressed: false, press: 0 },
+      { x: W * 0.78, pressed: false, press: 0 }
+    ];
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      { passive: false }
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      { passive: false }
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      pointerDown
+    );
+
+    raf =
+      requestAnimationFrame(loop);
+
+    setTimeout(function(){
+
+      if(
+        root &&
+        !destroyed
+      ){
+        root.focus();
+      }
+
+    },0);
+  }
+
+  function destroy(){
+
+    if(destroyed){
+      return;
+    }
+
+    destroyed = true;
+
+    cancelAnimationFrame(raf);
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+
+      root.removeEventListener(
+        'pointerdown',
+        pointerDown
+      );
+
+      root.remove();
+    }
+
+    root = null;
+    canvas = null;
+    ctx = null;
+
+    bullets = [];
+    sparks = [];
+    heartBits = [];
+    switches = [];
+  }
+
+  return {
+    mount: mount,
+    destroy: destroy
+  };
+}
+
+const game = {
+
+  id: GAME_ID,
+
+  name:
+    '天井が落ちてくる仕掛け',
+
+  _instance: null,
+
+  mount: function(target){
+
+    this.destroy();
+
+    this._instance =
+      createCeilingTrap();
+
+    this._instance.mount(target);
+  },
+
+  destroy: function(){
+
+    if(this._instance){
+
+      this._instance.destroy();
+      this._instance = null;
+    }
+  }
+};
+
+if(
+  window.MiniGames &&
+  typeof window.MiniGames.register ===
+    'function'
+){
+
+  window.MiniGames.register(game);
+
+}else{
+
+  document.documentElement.style.width =
+    '100%';
+
+  document.documentElement.style.height =
+    '100%';
+
+  document.body.style.cssText =
+    'margin:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'overflow:hidden;' +
+    'background:#000;';
+
+  const standaloneHost =
+    document.createElement('div');
+
+  standaloneHost.style.cssText =
+    'position:fixed;' +
+    'inset:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'background:#000;';
+
+  document.body.appendChild(
+    standaloneHost
+  );
+
+  game.mount(standaloneHost);
+}
+
+})();
+</script>
+<!-- ==================================================================================== GAME BLOCK 12 END ==================================================================================== -->
+
+
+
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 13
      タイトル
 ======================================================================================================================================================================================================= -->
 
-<!-- ==================================================================================== GAME BLOCK 12 END ==================================================================================== -->
-
+<!-- ==================================================================================== GAME BLOCK 13 END ==================================================================================== -->
 
 
 
