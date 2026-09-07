@@ -27334,14 +27334,4022 @@ if(
 
 <!-- =======================================================================================================================================================================================================
      🎮 GAME BLOCK 13
-     タイトル
+     ボックス・カッター
 ======================================================================================================================================================================================================= -->
+<style>
+.boxc-root{
+  position:relative;
+  width:100%;
+  height:100%;
+  min-height:480px;
+  overflow:hidden;
+  background:#000;
+  outline:none;
+  user-select:none;
+  -webkit-user-select:none;
+  font-family:Arial,"Yu Gothic",sans-serif;
+}
+.boxc-root canvas{
+  display:block;
+  width:100%;
+  height:100%;
+}
+</style>
 
+<script>
+(function(){
+
+'use strict';
+
+const GAME_ID = 'box-cutter';
+
+function createGame(){
+
+  const W = 960;
+  const H = 720;
+  const TAU = Math.PI * 2;
+
+  const CFG = {
+
+    /*
+      箱の総数。
+    */
+    totalBoxes:70,
+
+    /*
+      最初の箱が斬撃地点へ来る時間。
+    */
+    firstArrivalDelay:1.65,
+
+    /*
+      箱が斬撃地点へ到着する間隔。
+
+      後半ほど短くなる。
+    */
+    intervalStartMin:0.68,
+    intervalStartMax:0.90,
+
+    intervalMiddleMin:0.48,
+    intervalMiddleMax:0.66,
+
+    intervalLateMin:0.35,
+    intervalLateMax:0.49,
+
+    intervalFinalMin:0.28,
+    intervalFinalMax:0.39,
+
+    /*
+      箱の速度。
+
+      箱ごとに異なるが、
+      一つの箱は飛行中ずっと等速。
+    */
+    speedStartMin:650,
+    speedStartMax:760,
+
+    speedMiddleMin:740,
+    speedMiddleMax:880,
+
+    speedLateMin:850,
+    speedLateMax:1010,
+
+    speedFinalMin:960,
+    speedFinalMax:1140,
+
+    /*
+      箱の出現位置。
+    */
+    boxStartXMin:1010,
+    boxStartXMax:1140,
+
+    boxStartYMin:132,
+    boxStartYMax:456,
+
+    /*
+      箱の大きさ。
+    */
+    boxWidth:76,
+    boxHeight:132,
+    boxDepth:25,
+
+    /*
+      最後の箱。
+    */
+    finalBoxScale:1.20,
+
+    /*
+      斬撃地点。
+    */
+    cutPointX:285,
+    cutPointY:405,
+
+    /*
+      箱を斬れる範囲。
+    */
+    cutWindowX:38,
+    cutWindowY:58,
+
+    /*
+      剣士へ衝突する位置。
+    */
+    damagePointX:185,
+
+    /*
+      硬直中に箱を止める安全位置。
+
+      剣士へは届かず、
+      復帰後に斬れる位置。
+    */
+    recoveryGateX:245,
+
+    /*
+      斬撃。
+    */
+    slashCooldownSeconds:0.26,
+    slashEffectSeconds:0.21,
+    swordMotionSeconds:0.34,
+
+    /*
+      被弾。
+    */
+    damageStunSeconds:0.80,
+    invincibleSeconds:0.50,
+
+    /*
+      硬直終了後、
+      操作可能な状態で保証する猶予。
+    */
+    recoveryGraceSeconds:0.75,
+
+    damageFlashSeconds:0.26,
+    damageShakeAmount:10,
+
+    /*
+      破片。
+    */
+    cutPieceSeconds:0.52,
+
+    /*
+      最後の箱の処理後。
+    */
+    finishWaitSeconds:0.90,
+
+    /*
+      剣士。
+    */
+    swordsmanX:152,
+    swordsmanY:510,
+    swordsmanScale:1.18,
+
+    /*
+      ランク基準。
+    */
+    rankS:70,
+    rankA:65,
+    rankB:60,
+    rankC:55,
+    rankD:50,
+    rankE:45,
+
+    debug:false
+  };
+
+  let root = null;
+  let canvas = null;
+  let ctx = null;
+
+  let animationFrame = 0;
+  let previousTimestamp = 0;
+  let destroyed = false;
+
+  let canvasScale = 1;
+  let canvasOffsetX = 0;
+  let canvasOffsetY = 0;
+
+  let mode = 'title';
+
+  let elapsedTime = 0;
+  let finishTimer = 0;
+
+let boxPlans = [];
+let boxes = [];
+let cutPieces = [];
+let hitBoxes = [];
+let particles = [];
+
+  let resolvedBoxes = 0;
+  let cutCount = 0;
+  let damageCount = 0;
+
+  let slashType = 'none';
+  let slashCooldownTimer = 0;
+  let slashEffectTimer = 0;
+  let swordMotionTimer = 0;
+
+  let stunTimer = 0;
+  let invincibleTimer = 0;
+  let recoveryGraceTimer = 0;
+  let damageFlashTimer = 0;
+
+  let screenShakeX = 0;
+  let screenShakeY = 0;
+
+  let spaceReady = true;
+
+  function clamp(value,minimum,maximum){
+
+    return Math.max(
+      minimum,
+      Math.min(
+        maximum,
+        value
+      )
+    );
+  }
+
+  function randomRange(minimum,maximum){
+
+    return (
+      minimum +
+      Math.random() *
+      (
+        maximum -
+        minimum
+      )
+    );
+  }
+
+  function randomInteger(minimum,maximum){
+
+    return Math.floor(
+      randomRange(
+        minimum,
+        maximum + 1
+      )
+    );
+  }
+
+  function easeOutCubic(progress){
+
+    return (
+      1 -
+      Math.pow(
+        1 - progress,
+        3
+      )
+    );
+  }
+
+  function roundedRect(
+    x,
+    y,
+    width,
+    height,
+    radius
+  ){
+
+    radius =
+      Math.min(
+        radius,
+        width / 2,
+        height / 2
+      );
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      x + radius,
+      y
+    );
+
+    ctx.lineTo(
+      x + width - radius,
+      y
+    );
+
+    ctx.quadraticCurveTo(
+      x + width,
+      y,
+      x + width,
+      y + radius
+    );
+
+    ctx.lineTo(
+      x + width,
+      y + height - radius
+    );
+
+    ctx.quadraticCurveTo(
+      x + width,
+      y + height,
+      x + width - radius,
+      y + height
+    );
+
+    ctx.lineTo(
+      x + radius,
+      y + height
+    );
+
+    ctx.quadraticCurveTo(
+      x,
+      y + height,
+      x,
+      y + height - radius
+    );
+
+    ctx.lineTo(
+      x,
+      y + radius
+    );
+
+    ctx.quadraticCurveTo(
+      x,
+      y,
+      x + radius,
+      y
+    );
+
+    ctx.closePath();
+  }
+
+  function getRank(){
+
+    if(cutCount >= CFG.rankS){
+      return 'S';
+    }
+
+    if(cutCount >= CFG.rankA){
+      return 'A';
+    }
+
+    if(cutCount >= CFG.rankB){
+      return 'B';
+    }
+
+    if(cutCount >= CFG.rankC){
+      return 'C';
+    }
+
+    if(cutCount >= CFG.rankD){
+      return 'D';
+    }
+
+    if(cutCount >= CFG.rankE){
+      return 'E';
+    }
+
+    return 'F';
+  }
+
+  function getRankColor(rank){
+
+    const colors = {
+      F:'#69D9FF',
+      E:'#9BE04B',
+      D:'#FFD84A',
+      C:'#FF982F',
+      B:'#FF4242',
+      A:'#FF69B4',
+      S:'#FF786D'
+    };
+
+    return colors[rank];
+  }
+
+  /*
+    ========================================
+    箱の流れ
+    ========================================
+  */
+
+function getDifficulty(progress){
+
+  /*
+    最初の10％だけ準備区間。
+    その後は早めに速度と密度を上げる。
+  */
+  if(progress < 0.10){
+
+    return {
+      intervalMin:CFG.intervalStartMin,
+      intervalMax:CFG.intervalStartMax,
+      speedMin:CFG.speedStartMin,
+      speedMax:CFG.speedStartMax
+    };
+  }
+
+  if(progress < 0.32){
+
+    return {
+      intervalMin:CFG.intervalMiddleMin,
+      intervalMax:CFG.intervalMiddleMax,
+      speedMin:CFG.speedMiddleMin,
+      speedMax:CFG.speedMiddleMax
+    };
+  }
+
+  if(progress < 0.68){
+
+    return {
+      intervalMin:CFG.intervalLateMin,
+      intervalMax:CFG.intervalLateMax,
+      speedMin:CFG.speedLateMin,
+      speedMax:CFG.speedLateMax
+    };
+  }
+
+  return {
+    intervalMin:CFG.intervalFinalMin,
+    intervalMax:CFG.intervalFinalMax,
+    speedMin:CFG.speedFinalMin,
+    speedMax:CFG.speedFinalMax
+  };
+}
+
+  function createGrooveSequence(){
+
+    const sequence = [];
+
+    let previous =
+      Math.random() < 0.5
+        ? 'vertical'
+        : 'horizontal';
+
+    sequence.push(
+      previous
+    );
+
+    for(
+      let i = 1;
+      i < CFG.totalBoxes;
+      i++
+    ){
+
+      const progress =
+        i /
+        Math.max(
+          1,
+          CFG.totalBoxes - 1
+        );
+
+      const switchChance =
+        0.48 +
+        progress * 0.18;
+
+      let next =
+        Math.random() <
+        switchChance
+          ? (
+              previous === 'vertical'
+                ? 'horizontal'
+                : 'vertical'
+            )
+          : previous;
+
+      /*
+        同じ方向が続きすぎないようにする。
+      */
+      if(
+        i >= 3 &&
+        sequence[i - 1] === next &&
+        sequence[i - 2] === next &&
+        sequence[i - 3] === next
+      ){
+
+        next =
+          next === 'vertical'
+            ? 'horizontal'
+            : 'vertical';
+      }
+
+      sequence.push(
+        next
+      );
+
+      previous = next;
+    }
+
+    return sequence;
+  }
+
+  function createBoxPlans(){
+
+    boxPlans = [];
+
+    const grooves =
+      createGrooveSequence();
+
+    let arrivalTime =
+      CFG.firstArrivalDelay;
+
+    for(
+      let i = 0;
+      i < CFG.totalBoxes;
+      i++
+    ){
+
+      const progress =
+        i /
+        Math.max(
+          1,
+          CFG.totalBoxes - 1
+        );
+
+      const difficulty =
+        getDifficulty(
+          progress
+        );
+
+      if(i > 0){
+
+        arrivalTime +=
+          randomRange(
+            difficulty.intervalMin,
+            difficulty.intervalMax
+          );
+      }
+
+      /*
+        斬撃クールタイムより短い間隔にはしない。
+      */
+      const previousArrival =
+        i > 0
+          ? boxPlans[i - 1].arrivalTime
+          : -Infinity;
+
+      arrivalTime =
+        Math.max(
+          arrivalTime,
+          previousArrival +
+          CFG.slashCooldownSeconds +
+          0.07
+        );
+
+      const startX =
+        randomRange(
+          CFG.boxStartXMin,
+          CFG.boxStartXMax
+        );
+
+      const startY =
+        randomRange(
+          CFG.boxStartYMin,
+          CFG.boxStartYMax
+        );
+
+      const speed =
+        randomRange(
+          difficulty.speedMin,
+          difficulty.speedMax
+        );
+
+      const distance =
+        Math.hypot(
+          CFG.cutPointX - startX,
+          CFG.cutPointY - startY
+        );
+
+      const travelSeconds =
+        distance /
+        speed;
+
+      boxPlans.push({
+        index:i,
+        arrivalTime:arrivalTime,
+        spawnTime:
+          arrivalTime -
+          travelSeconds,
+        startX:startX,
+        startY:startY,
+        speed:speed,
+        groove:grooves[i],
+        final:
+          i ===
+          CFG.totalBoxes - 1,
+        spawned:false
+      });
+    }
+
+    let earliestSpawn =
+      Infinity;
+
+    for(const plan of boxPlans){
+
+      earliestSpawn =
+        Math.min(
+          earliestSpawn,
+          plan.spawnTime
+        );
+    }
+
+    if(earliestSpawn < 0.18){
+
+      const offset =
+        0.18 -
+        earliestSpawn;
+
+      for(const plan of boxPlans){
+
+        plan.spawnTime +=
+          offset;
+
+        plan.arrivalTime +=
+          offset;
+      }
+    }
+  }
+
+  function spawnBox(plan){
+
+    const deltaX =
+      CFG.cutPointX -
+      plan.startX;
+
+    const deltaY =
+      CFG.cutPointY -
+      plan.startY;
+
+    const distance =
+      Math.hypot(
+        deltaX,
+        deltaY
+      );
+
+    boxes.push({
+      index:plan.index,
+      x:plan.startX,
+      y:plan.startY,
+      velocityX:
+        deltaX /
+        distance *
+        plan.speed,
+      velocityY:
+        deltaY /
+        distance *
+        plan.speed,
+      groove:plan.groove,
+      rotation:
+        randomRange(
+          -0.045,
+          0.045
+        ),
+      scale:
+        plan.final
+          ? CFG.finalBoxScale
+          : 1,
+      final:plan.final,
+wrongSlash:false,
+resolved:false,
+heldForRecovery:false,
+passedDuringInvincibility:false,
+passedDuringRecovery:false
+    });
+
+    plan.spawned = true;
+  }
+
+  function updateBoxSpawning(){
+
+    for(const plan of boxPlans){
+
+      if(
+        !plan.spawned &&
+        elapsedTime >=
+        plan.spawnTime
+      ){
+
+        spawnBox(
+          plan
+        );
+      }
+    }
+  }
+
+function isBoxInCutWindow(box){
+
+  const leftLimit =
+    CFG.damagePointX +
+    12;
+
+  const rightLimit =
+    CFG.cutPointX +
+    CFG.cutWindowX;
+
+  const topLimit =
+    CFG.cutPointY -
+    CFG.cutWindowY;
+
+  const bottomLimit =
+    CFG.cutPointY +
+    CFG.cutWindowY;
+
+  /*
+    筋は箱の正面中央に描かれている。
+
+    drawBoxShape()では正面中央が
+    box.x、box.yと一致しているため、
+    奥行きによる補正は加えない。
+  */
+  const grooveCenterX =
+    box.x;
+
+  const grooveCenterY =
+    box.y;
+
+  return (
+    grooveCenterX >= leftLimit &&
+    grooveCenterX <= rightLimit &&
+    grooveCenterY >= topLimit &&
+    grooveCenterY <= bottomLimit
+  );
+}
+
+  function getClosestCuttableBox(){
+
+    let closest = null;
+    let closestDistance =
+      Infinity;
+
+    for(const box of boxes){
+
+      if(
+        box.resolved ||
+        !isBoxInCutWindow(
+          box
+        )
+      ){
+
+        continue;
+      }
+
+      const distance =
+        Math.hypot(
+          box.x -
+          CFG.cutPointX,
+          box.y -
+          CFG.cutPointY
+        );
+
+      if(
+        distance <
+        closestDistance
+      ){
+
+        closest = box;
+        closestDistance =
+          distance;
+      }
+    }
+
+    return closest;
+  }
+
+  /*
+    ========================================
+    斬撃
+    ========================================
+  */
+
+  function performSlash(type){
+
+    if(
+      mode !== 'play' ||
+      stunTimer > 0 ||
+      slashCooldownTimer > 0
+    ){
+
+      return;
+    }
+
+    slashType = type;
+
+    slashCooldownTimer =
+      CFG.slashCooldownSeconds;
+
+    slashEffectTimer =
+      CFG.slashEffectSeconds;
+
+    swordMotionTimer =
+      CFG.swordMotionSeconds;
+
+    const target =
+      getClosestCuttableBox();
+
+    if(!target){
+
+      createParticles(
+        CFG.cutPointX,
+        CFG.cutPointY,
+        '#d8f5ff',
+        5,
+        70,
+        145
+      );
+
+      return;
+    }
+
+    if(
+      target.groove ===
+      type
+    ){
+
+      cutBox(
+        target,
+        type
+      );
+
+    }else{
+
+      target.wrongSlash = true;
+
+      createParticles(
+        target.x,
+        target.y,
+        '#ffb44f',
+        13,
+        100,
+        250
+      );
+    }
+  }
+
+  function cutBox(box,type){
+
+    if(box.resolved){
+      return;
+    }
+
+    box.resolved = true;
+
+    resolvedBoxes++;
+    cutCount++;
+
+    createCutPieces(
+      box,
+      type
+    );
+
+    createParticles(
+      box.x,
+      box.y,
+      box.final
+        ? '#fff2b1'
+        : '#e9fbff',
+      box.final
+        ? 34
+        : 20,
+      110,
+      box.final
+        ? 440
+        : 340
+    );
+
+    const index =
+      boxes.indexOf(
+        box
+      );
+
+    if(index >= 0){
+
+      boxes.splice(
+        index,
+        1
+      );
+    }
+  }
+
+  function createCutPieces(box,type){
+
+    for(
+      let i = 0;
+      i < 2;
+      i++
+    ){
+
+      const side =
+        i === 0
+          ? -1
+          : 1;
+
+      let extraX = 0;
+      let extraY = 0;
+
+      if(type === 'vertical'){
+
+        extraX =
+          side *
+          randomRange(
+            135,
+            225
+          );
+
+        extraY =
+          randomRange(
+            -70,
+            60
+          );
+
+      }else{
+
+        extraX =
+          randomRange(
+            -35,
+            65
+          );
+
+        extraY =
+          side *
+          randomRange(
+            145,
+            235
+          );
+      }
+
+      cutPieces.push({
+        x:box.x,
+        y:box.y,
+        velocityX:
+          box.velocityX *
+          0.16 +
+          extraX,
+        velocityY:
+          box.velocityY *
+          0.16 +
+          extraY,
+        rotation:box.rotation,
+        rotationSpeed:
+          side *
+          randomRange(
+            4,
+            7.5
+          ),
+        scale:box.scale,
+        cutType:type,
+        side:side,
+        life:
+          CFG.cutPieceSeconds,
+        maximumLife:
+          CFG.cutPieceSeconds
+      });
+    }
+  }
+
+  function createParticles(
+    x,
+    y,
+    color,
+    count,
+    speedMin,
+    speedMax
+  ){
+
+    for(
+      let i = 0;
+      i < count;
+      i++
+    ){
+
+      const angle =
+        randomRange(
+          0,
+          TAU
+        );
+
+      const speed =
+        randomRange(
+          speedMin,
+          speedMax
+        );
+
+      particles.push({
+        x:x,
+        y:y,
+        velocityX:
+          Math.cos(
+            angle
+          ) *
+          speed,
+        velocityY:
+          Math.sin(
+            angle
+          ) *
+          speed,
+        color:color,
+        size:
+          randomRange(
+            1.5,
+            5
+          ),
+        life:
+          randomRange(
+            0.18,
+            0.40
+          ),
+        maximumLife:0.40
+      });
+    }
+  }
+
+  /*
+    ========================================
+    被弾と復帰保証
+    ========================================
+  */
+
+  function damageSwordsman(){
+
+    if(invincibleTimer > 0){
+
+      return;
+    }
+
+    damageCount++;
+
+    stunTimer =
+      CFG.damageStunSeconds;
+
+    invincibleTimer =
+      CFG.invincibleSeconds;
+
+    recoveryGraceTimer =
+      CFG.damageStunSeconds +
+      CFG.recoveryGraceSeconds;
+
+    damageFlashTimer =
+      CFG.damageFlashSeconds;
+  }
+
+ function resolveCollision(box){
+
+  if(box.resolved){
+    return;
+  }
+
+  /*
+    一度接触した時点で解決済みにする。
+
+    この箱からは二度と
+    ダメージ判定を発生させない。
+  */
+  box.resolved = true;
+
+  resolvedBoxes++;
+
+  damageSwordsman();
+
+  /*
+    接触した箱を通常の箱一覧から
+    先に完全削除する。
+  */
+  const index =
+    boxes.indexOf(
+      box
+    );
+
+  if(index >= 0){
+
+    boxes.splice(
+      index,
+      1
+    );
+  }
+
+  /*
+    見た目専用の箱として、
+    剣士の頭上方向へ吹き飛ばす。
+
+    hitBoxesには攻撃判定がない。
+  */
+  hitBoxes.push({
+    x:box.x,
+    y:box.y,
+
+    velocityX:
+      randomRange(
+        70,
+        145
+      ),
+
+    velocityY:
+      randomRange(
+        -560,
+        -440
+      ),
+
+    rotation:
+      box.rotation,
+
+    rotationSpeed:
+      randomRange(
+        -7.5,
+        7.5
+      ),
+
+    scale:
+      box.scale,
+
+    groove:
+      box.groove,
+
+    final:
+      box.final,
+
+    wrongSlash:
+      box.wrongSlash,
+
+    life:1.35,
+    maximumLife:1.35
+  });
+
+  createParticles(
+    box.x,
+    box.y,
+    '#d89143',
+    18,
+    90,
+    270
+  );
+}
+
+function updateBoxes(deltaTime){
+
+  for(
+    let i = boxes.length - 1;
+    i >= 0;
+    i--
+  ){
+
+    const box =
+      boxes[i];
+
+    box.x +=
+      box.velocityX *
+      deltaTime;
+
+    box.y +=
+      box.velocityY *
+      deltaTime;
+
+    /*
+      ダメージ後の保護時間中に
+      安全線へ入った箱は通過扱いにする。
+
+      保護時間が解除されても、
+      この箱の攻撃判定は復活しない。
+    */
+    if(
+      recoveryGraceTimer > 0 &&
+      box.x <= CFG.recoveryGateX
+    ){
+
+      box.passedDuringRecovery =
+        true;
+    }
+
+    /*
+      通過扱いではない箱だけが
+      剣士へダメージを与える。
+    */
+    if(
+      !box.passedDuringRecovery &&
+      box.x <= CFG.damagePointX
+    ){
+
+      resolveCollision(
+        box
+      );
+
+      continue;
+    }
+
+    /*
+      通過扱いの箱は剣士をすり抜け、
+      画面左へ出たら削除する。
+    */
+    if(
+      box.passedDuringRecovery &&
+      box.x <
+      -CFG.boxWidth * 2
+    ){
+
+      box.resolved = true;
+
+      resolvedBoxes++;
+
+      boxes.splice(
+        i,
+        1
+      );
+    }
+  }
+}
+
+  /*
+    ========================================
+    ゲーム進行
+    ========================================
+  */
+
+  function startGame(){
+
+    elapsedTime = 0;
+    finishTimer = 0;
+
+boxPlans = [];
+boxes = [];
+cutPieces = [];
+hitBoxes = [];
+particles = [];
+
+    resolvedBoxes = 0;
+    cutCount = 0;
+    damageCount = 0;
+
+    slashType = 'none';
+    slashCooldownTimer = 0;
+    slashEffectTimer = 0;
+    swordMotionTimer = 0;
+
+    stunTimer = 0;
+    invincibleTimer = 0;
+    recoveryGraceTimer = 0;
+    damageFlashTimer = 0;
+
+    screenShakeX = 0;
+    screenShakeY = 0;
+
+    createBoxPlans();
+
+    mode = 'play';
+  }
+
+  function updateEffects(deltaTime){
+
+/*
+  被弾後に頭上へ吹き飛んだ箱。
+
+  描画専用なので、
+  剣士への攻撃判定は持たない。
+*/
+for(
+  let i = hitBoxes.length - 1;
+  i >= 0;
+  i--
+){
+
+  const hitBox =
+    hitBoxes[i];
+
+  hitBox.life -=
+    deltaTime;
+
+  if(
+    hitBox.life <= 0 ||
+    hitBox.y < -220 ||
+    hitBox.x > W + 220
+  ){
+
+    hitBoxes.splice(
+      i,
+      1
+    );
+
+    continue;
+  }
+
+  hitBox.x +=
+    hitBox.velocityX *
+    deltaTime;
+
+  hitBox.y +=
+    hitBox.velocityY *
+    deltaTime;
+
+  /*
+    重力で放物線を描く。
+  */
+  hitBox.velocityY +=
+    760 *
+    deltaTime;
+
+  hitBox.rotation +=
+    hitBox.rotationSpeed *
+    deltaTime;
+}
+
+    for(
+      let i =
+        cutPieces.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const piece =
+        cutPieces[i];
+
+      piece.life -=
+        deltaTime;
+
+      if(piece.life <= 0){
+
+        cutPieces.splice(
+          i,
+          1
+        );
+
+        continue;
+      }
+
+      piece.x +=
+        piece.velocityX *
+        deltaTime;
+
+      piece.y +=
+        piece.velocityY *
+        deltaTime;
+
+      piece.velocityY +=
+        440 *
+        deltaTime;
+
+      piece.rotation +=
+        piece.rotationSpeed *
+        deltaTime;
+    }
+
+    for(
+      let i =
+        particles.length - 1;
+      i >= 0;
+      i--
+    ){
+
+      const particle =
+        particles[i];
+
+      particle.life -=
+        deltaTime;
+
+      if(
+        particle.life <= 0
+      ){
+
+        particles.splice(
+          i,
+          1
+        );
+
+        continue;
+      }
+
+      particle.x +=
+        particle.velocityX *
+        deltaTime;
+
+      particle.y +=
+        particle.velocityY *
+        deltaTime;
+
+      particle.velocityX *=
+        Math.pow(
+          0.05,
+          deltaTime
+        );
+
+      particle.velocityY +=
+        250 *
+        deltaTime;
+    }
+  }
+
+  function updateTimers(deltaTime){
+
+    slashCooldownTimer =
+      Math.max(
+        0,
+        slashCooldownTimer -
+        deltaTime
+      );
+
+    slashEffectTimer =
+      Math.max(
+        0,
+        slashEffectTimer -
+        deltaTime
+      );
+
+    swordMotionTimer =
+      Math.max(
+        0,
+        swordMotionTimer -
+        deltaTime
+      );
+
+    stunTimer =
+      Math.max(
+        0,
+        stunTimer -
+        deltaTime
+      );
+
+    invincibleTimer =
+      Math.max(
+        0,
+        invincibleTimer -
+        deltaTime
+      );
+
+    recoveryGraceTimer =
+      Math.max(
+        0,
+        recoveryGraceTimer -
+        deltaTime
+      );
+
+    damageFlashTimer =
+      Math.max(
+        0,
+        damageFlashTimer -
+        deltaTime
+      );
+
+    if(damageFlashTimer > 0){
+
+      const strength =
+        damageFlashTimer /
+        CFG.damageFlashSeconds;
+
+      screenShakeX =
+        randomRange(
+          -CFG.damageShakeAmount,
+          CFG.damageShakeAmount
+        ) *
+        strength;
+
+      screenShakeY =
+        randomRange(
+          -CFG.damageShakeAmount,
+          CFG.damageShakeAmount
+        ) *
+        strength;
+
+    }else{
+
+      screenShakeX = 0;
+      screenShakeY = 0;
+    }
+  }
+
+  function update(deltaTime){
+
+    updateEffects(
+      deltaTime
+    );
+
+    updateTimers(
+      deltaTime
+    );
+
+    if(mode === 'play'){
+
+      elapsedTime +=
+        deltaTime;
+
+      updateBoxSpawning();
+
+      updateBoxes(
+        deltaTime
+      );
+
+      if(
+        resolvedBoxes >=
+        CFG.totalBoxes
+      ){
+
+        finishTimer +=
+          deltaTime;
+
+        if(
+          finishTimer >=
+          CFG.finishWaitSeconds
+        ){
+
+          mode = 'result';
+
+          spaceReady = false;
+        }
+
+      }else{
+
+        finishTimer = 0;
+      }
+    }
+  }
+
+  /*
+    ========================================
+    背景
+    ========================================
+  */
+
+  function drawStageBackground(){
+
+    /*
+      明るい和風稽古場。
+    */
+    const wall =
+      ctx.createLinearGradient(
+        0,
+        0,
+        0,
+        H
+      );
+
+    wall.addColorStop(
+      0,
+      '#e8ddc6'
+    );
+
+    wall.addColorStop(
+      0.65,
+      '#c9b99d'
+    );
+
+    wall.addColorStop(
+      1,
+      '#806f59'
+    );
+
+    ctx.fillStyle =
+      wall;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    /*
+      木製の梁。
+    */
+    ctx.fillStyle =
+      '#4b3629';
+
+    ctx.fillRect(
+      0,
+      72,
+      W,
+      22
+    );
+
+    ctx.fillRect(
+      0,
+      468,
+      W,
+      18
+    );
+
+    for(
+      let x = 42;
+      x < W;
+      x += 165
+    ){
+
+      ctx.fillRect(
+        x,
+        70,
+        18,
+        420
+      );
+    }
+
+    /*
+      障子風の壁面。
+    */
+    ctx.fillStyle =
+      'rgba(255,249,229,.52)';
+
+    for(
+      let x = 74;
+      x < W - 50;
+      x += 165
+    ){
+
+      ctx.fillRect(
+        x,
+        112,
+        128,
+        328
+      );
+
+      ctx.strokeStyle =
+        'rgba(87,64,46,.36)';
+
+      ctx.lineWidth = 3;
+
+      ctx.strokeRect(
+        x,
+        112,
+        128,
+        328
+      );
+
+      for(
+        let y = 166;
+        y < 440;
+        y += 55
+      ){
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          x,
+          y
+        );
+
+        ctx.lineTo(
+          x + 128,
+          y
+        );
+
+        ctx.stroke();
+      }
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        x + 64,
+        112
+      );
+
+      ctx.lineTo(
+        x + 64,
+        440
+      );
+
+      ctx.stroke();
+    }
+
+    /*
+      木の床。
+    */
+    const floor =
+      ctx.createLinearGradient(
+        0,
+        486,
+        0,
+        H
+      );
+
+    floor.addColorStop(
+      0,
+      '#9a7653'
+    );
+
+    floor.addColorStop(
+      1,
+      '#4b392d'
+    );
+
+    ctx.fillStyle =
+      floor;
+
+    ctx.fillRect(
+      0,
+      486,
+      W,
+      H - 486
+    );
+
+    ctx.strokeStyle =
+      'rgba(44,30,22,.29)';
+
+    ctx.lineWidth = 2;
+
+    for(
+      let y = 520;
+      y < H;
+      y += 42
+    ){
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        0,
+        y
+      );
+
+      ctx.lineTo(
+        W,
+        y
+      );
+
+      ctx.stroke();
+    }
+
+    /*
+      周辺減光。
+    */
+    const vignette =
+      ctx.createRadialGradient(
+        W / 2,
+        H / 2,
+        240,
+        W / 2,
+        H / 2,
+        660
+      );
+
+    vignette.addColorStop(
+      0,
+      'rgba(0,0,0,0)'
+    );
+
+    vignette.addColorStop(
+      1,
+      'rgba(25,15,10,.37)'
+    );
+
+    ctx.fillStyle =
+      vignette;
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+  }
+
+  /*
+    ========================================
+    剣士と刀
+    ========================================
+  */
+
+  function drawStraightSword(
+    handleX,
+    handleY,
+    angle,
+    length
+  ){
+
+    ctx.save();
+
+    ctx.translate(
+      handleX,
+      handleY
+    );
+
+    ctx.rotate(
+      angle
+    );
+
+    /*
+      柄。
+    */
+    ctx.fillStyle =
+      '#34231b';
+
+    roundedRect(
+      -7,
+      -4,
+      14,
+      48,
+      5
+    );
+
+    ctx.fill();
+
+    /*
+      鍔。
+    */
+    ctx.fillStyle =
+      '#d6a940';
+
+    ctx.fillRect(
+      -19,
+      -7,
+      38,
+      8
+    );
+
+    /*
+      直線的な刀身。
+    */
+    const blade =
+      ctx.createLinearGradient(
+        -7,
+        0,
+        7,
+        0
+      );
+
+    blade.addColorStop(
+      0,
+      '#70848e'
+    );
+
+    blade.addColorStop(
+      0.45,
+      '#ffffff'
+    );
+
+    blade.addColorStop(
+      1,
+      '#a7dce9'
+    );
+
+    ctx.fillStyle =
+      blade;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      -6,
+      -7
+    );
+
+    ctx.lineTo(
+      -4,
+      -length
+    );
+
+    ctx.lineTo(
+      0,
+      -length - 17
+    );
+
+    ctx.lineTo(
+      5,
+      -length
+    );
+
+    ctx.lineTo(
+      6,
+      -7
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#53636a';
+
+    ctx.lineWidth = 2;
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  function drawSwordsman(){
+
+    const blink =
+      invincibleTimer > 0 &&
+      Math.floor(
+        invincibleTimer * 18
+      ) %
+      2 === 0;
+
+    if(blink){
+
+      return;
+    }
+
+    ctx.save();
+
+    ctx.translate(
+      CFG.swordsmanX,
+      CFG.swordsmanY
+    );
+
+    ctx.scale(
+      CFG.swordsmanScale,
+      CFG.swordsmanScale
+    );
+
+    if(stunTimer > 0){
+
+      ctx.rotate(
+        -0.09
+      );
+    }
+
+    /*
+      地面の影。
+    */
+    ctx.save();
+
+    ctx.translate(
+      0,
+      92
+    );
+
+    ctx.scale(
+      1,
+      0.22
+    );
+
+    const shadow =
+      ctx.createRadialGradient(
+        0,
+        0,
+        1,
+        0,
+        0,
+        70
+      );
+
+    shadow.addColorStop(
+      0,
+      'rgba(0,0,0,.48)'
+    );
+
+    shadow.addColorStop(
+      1,
+      'rgba(0,0,0,0)'
+    );
+
+    ctx.fillStyle =
+      shadow;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      0,
+      70,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    ctx.restore();
+
+    /*
+      脚。
+    */
+    ctx.strokeStyle =
+      '#282a2d';
+
+    ctx.lineWidth = 22;
+    ctx.lineCap = 'round';
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      -18,
+      15
+    );
+
+    ctx.lineTo(
+      -42,
+      84
+    );
+
+    ctx.moveTo(
+      18,
+      15
+    );
+
+    ctx.lineTo(
+      42,
+      84
+    );
+
+    ctx.stroke();
+
+    /*
+      胴体。
+    */
+    const clothing =
+      ctx.createLinearGradient(
+        -45,
+        -94,
+        45,
+        28
+      );
+
+    clothing.addColorStop(
+      0,
+      '#414a51'
+    );
+
+    clothing.addColorStop(
+      0.52,
+      '#22292e'
+    );
+
+    clothing.addColorStop(
+      1,
+      '#11171b'
+    );
+
+    ctx.fillStyle =
+      clothing;
+
+    roundedRect(
+      -45,
+      -92,
+      90,
+      112,
+      22
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#0b0f12';
+
+    ctx.lineWidth = 4;
+
+    ctx.stroke();
+
+    /*
+      帯。
+    */
+    ctx.fillStyle =
+      '#a6372d';
+
+    ctx.fillRect(
+      -45,
+      -7,
+      90,
+      14
+    );
+
+    /*
+      頭。
+    */
+    const face =
+      ctx.createRadialGradient(
+        -10,
+        -127,
+        4,
+        0,
+        -115,
+        34
+      );
+
+    face.addColorStop(
+      0,
+      '#f1d1aa'
+    );
+
+    face.addColorStop(
+      1,
+      '#a36b4d'
+    );
+
+    ctx.fillStyle =
+      face;
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      -115,
+      34,
+      0,
+      TAU
+    );
+
+    ctx.fill();
+
+    /*
+      頭部装備。
+    */
+    ctx.fillStyle =
+      '#1c2328';
+
+    ctx.beginPath();
+
+    ctx.arc(
+      0,
+      -123,
+      35,
+      Math.PI,
+      TAU
+    );
+
+    ctx.lineTo(
+      35,
+      -111
+    );
+
+    ctx.lineTo(
+      -35,
+      -111
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+    /*
+      斬撃中の腕と刀。
+    */
+    if(
+      swordMotionTimer > 0 &&
+      stunTimer <= 0
+    ){
+
+      const progress =
+        1 -
+        swordMotionTimer /
+        CFG.swordMotionSeconds;
+
+      const swing =
+        easeOutCubic(
+          clamp(
+            progress,
+            0,
+            1
+          )
+        );
+
+if(
+  slashType ===
+  'vertical'
+){
+
+  /*
+    頭上から下まで大きく振り抜く縦斬り。
+
+    刀は約180度回転し、
+    柄の位置も上から下へ移動する。
+  */
+  const swordAngle =
+    -0.42 +
+    swing * 3.05;
+
+  const swordHandleX =
+    47 +
+    Math.sin(
+      swing * Math.PI
+    ) * 24;
+
+  const swordHandleY =
+    -92 +
+    swing * 102;
+
+  /*
+    刀を持つ腕も振り下ろす。
+  */
+  const armStartX = 24;
+  const armStartY = -70;
+
+  const armEndX =
+    swordHandleX;
+
+  const armEndY =
+    swordHandleY;
+
+  ctx.strokeStyle =
+    '#3d464c';
+
+  ctx.lineWidth = 20;
+
+  ctx.lineCap =
+    'round';
+
+  ctx.beginPath();
+
+  ctx.moveTo(
+    armStartX,
+    armStartY
+  );
+
+  ctx.lineTo(
+    armEndX,
+    armEndY
+  );
+
+  ctx.stroke();
+
+  /*
+    反対側の腕も刀へ添える。
+  */
+  ctx.beginPath();
+
+  ctx.moveTo(
+    -19,
+    -65
+  );
+
+  ctx.lineTo(
+    swordHandleX - 11,
+    swordHandleY + 9
+  );
+
+  ctx.stroke();
+
+  drawStraightSword(
+    swordHandleX,
+    swordHandleY,
+    swordAngle,
+    145
+  );
+
+}else{
+
+        const swordAngle =
+          -1.92 +
+          swing * 1.18;
+
+        ctx.strokeStyle =
+          '#3d464c';
+
+        ctx.lineWidth = 20;
+
+        ctx.beginPath();
+
+        ctx.moveTo(
+          25,
+          -67
+        );
+
+        ctx.lineTo(
+          60,
+          -41
+        );
+
+        ctx.stroke();
+
+        drawStraightSword(
+          60,
+          -41,
+          swordAngle,
+          145
+        );
+      }
+
+    }else{
+
+      /*
+        通常待機姿勢。
+      */
+      ctx.strokeStyle =
+        '#3d464c';
+
+      ctx.lineWidth = 20;
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        25,
+        -70
+      );
+
+      ctx.lineTo(
+        57,
+        -40
+      );
+
+      ctx.moveTo(
+        -25,
+        -70
+      );
+
+      ctx.lineTo(
+        -51,
+        -34
+      );
+
+      ctx.stroke();
+
+      drawStraightSword(
+        58,
+        -40,
+        -0.30,
+        140
+      );
+    }
+
+    if(stunTimer > 0){
+
+      ctx.fillStyle =
+        'rgba(255,71,45,.23)';
+
+      ctx.beginPath();
+
+      ctx.arc(
+        0,
+        -36,
+        90,
+        0,
+        TAU
+      );
+
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  /*
+    ========================================
+    箱の描画
+    ========================================
+  */
+
+  function drawBoxShape(box,alpha){
+
+    const width =
+      CFG.boxWidth *
+      box.scale;
+
+    const height =
+      CFG.boxHeight *
+      box.scale;
+
+    const depth =
+      CFG.boxDepth *
+      box.scale;
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      alpha === undefined
+        ? 1
+        : alpha;
+
+    ctx.translate(
+      box.x,
+      box.y
+    );
+
+    ctx.rotate(
+      box.rotation
+    );
+
+    /*
+      右側面。
+    */
+    ctx.fillStyle =
+      box.final
+        ? '#713026'
+        : '#8b552f';
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      width / 2,
+      -height / 2
+    );
+
+    ctx.lineTo(
+      width / 2 + depth,
+      -height / 2 -
+      depth * 0.45
+    );
+
+    ctx.lineTo(
+      width / 2 + depth,
+      height / 2 -
+      depth * 0.45
+    );
+
+    ctx.lineTo(
+      width / 2,
+      height / 2
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+    /*
+      上面。
+    */
+    ctx.fillStyle =
+      box.final
+        ? '#d1794a'
+        : '#dba05d';
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      -width / 2,
+      -height / 2
+    );
+
+    ctx.lineTo(
+      -width / 2 + depth,
+      -height / 2 -
+      depth * 0.45
+    );
+
+    ctx.lineTo(
+      width / 2 + depth,
+      -height / 2 -
+      depth * 0.45
+    );
+
+    ctx.lineTo(
+      width / 2,
+      -height / 2
+    );
+
+    ctx.closePath();
+
+    ctx.fill();
+
+    /*
+      剣士側の面。
+    */
+    const front =
+      ctx.createLinearGradient(
+        -width / 2,
+        -height / 2,
+        width / 2,
+        height / 2
+      );
+
+    if(box.final){
+
+      front.addColorStop(
+        0,
+        '#df8551'
+      );
+
+      front.addColorStop(
+        0.50,
+        '#a94531'
+      );
+
+      front.addColorStop(
+        1,
+        '#68281f'
+      );
+
+    }else{
+
+      front.addColorStop(
+        0,
+        '#e2aa66'
+      );
+
+      front.addColorStop(
+        0.52,
+        '#bd7742'
+      );
+
+      front.addColorStop(
+        1,
+        '#824823'
+      );
+    }
+
+    ctx.fillStyle =
+      front;
+
+    roundedRect(
+      -width / 2,
+      -height / 2,
+      width,
+      height,
+      6
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#5a321d';
+
+    ctx.lineWidth =
+      box.final
+        ? 6
+        : 4;
+
+    ctx.stroke();
+
+    /*
+      縦筋または横筋。
+    */
+    ctx.strokeStyle =
+      box.final
+        ? '#ffffff'
+        : '#fff0a4';
+
+    ctx.shadowColor =
+      box.final
+        ? '#ff765a'
+        : '#ffd247';
+
+    ctx.shadowBlur =
+      box.final
+        ? 15
+        : 8;
+
+    ctx.lineWidth =
+      box.final
+        ? 10
+        : 8;
+
+    ctx.lineCap =
+      'round';
+
+    ctx.beginPath();
+
+    if(
+      box.groove ===
+      'vertical'
+    ){
+
+      ctx.moveTo(
+        0,
+        -height * 0.36
+      );
+
+      ctx.lineTo(
+        0,
+        height * 0.36
+      );
+
+    }else{
+
+      ctx.moveTo(
+        -width * 0.35,
+        0
+      );
+
+      ctx.lineTo(
+        width * 0.35,
+        0
+      );
+    }
+
+    ctx.stroke();
+
+    ctx.shadowColor =
+      'transparent';
+
+    ctx.shadowBlur = 0;
+
+    if(box.wrongSlash){
+
+      ctx.strokeStyle =
+        '#4a1c15';
+
+      ctx.lineWidth = 6;
+
+      ctx.beginPath();
+
+      if(
+        box.groove ===
+        'vertical'
+      ){
+
+        ctx.moveTo(
+          -width * 0.35,
+          -height * 0.12
+        );
+
+        ctx.lineTo(
+          width * 0.35,
+          height * 0.12
+        );
+
+      }else{
+
+        ctx.moveTo(
+          -width * 0.16,
+          -height * 0.35
+        );
+
+        ctx.lineTo(
+          width * 0.16,
+          height * 0.35
+        );
+      }
+
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+
+function drawCutZone(){
+
+  /*
+    実際の斬撃判定と同じ範囲。
+
+    右端は斬撃地点の手前側、
+    左端は剣士へ衝突する直前。
+  */
+  const leftLimit =
+    CFG.damagePointX +
+    12;
+
+  const rightLimit =
+    CFG.cutPointX +
+    CFG.cutWindowX;
+
+  const topLimit =
+    CFG.cutPointY -
+    CFG.cutWindowY;
+
+  const bottomLimit =
+    CFG.cutPointY +
+    CFG.cutWindowY;
+
+  const width =
+    rightLimit -
+    leftLimit;
+
+  const height =
+    bottomLimit -
+    topLimit;
+
+  ctx.save();
+
+  /*
+    半透明の赤い塗り。
+  */
+  ctx.fillStyle =
+    'rgba(255,55,45,.16)';
+
+  ctx.fillRect(
+    leftLimit,
+    topLimit,
+    width,
+    height
+  );
+
+  /*
+    赤い輪郭。
+  */
+  ctx.strokeStyle =
+    'rgba(255,75,60,.72)';
+
+  ctx.lineWidth = 3;
+
+  ctx.setLineDash([
+    9,
+    7
+  ]);
+
+  ctx.strokeRect(
+    leftLimit,
+    topLimit,
+    width,
+    height
+  );
+
+  ctx.setLineDash([]);
+
+  ctx.restore();
+}
+
+  function drawBoxes(){
+
+    const ordered =
+      boxes.slice().sort(
+        function(a,b){
+
+          return b.x - a.x;
+        }
+      );
+
+    for(const box of ordered){
+
+      drawBoxShape(
+        box,
+        1
+      );
+    }
+  }
+
+function drawHitBoxes(){
+
+  for(const hitBox of hitBoxes){
+
+    const alpha =
+      clamp(
+        hitBox.life /
+        hitBox.maximumLife,
+        0,
+        1
+      );
+
+    drawBoxShape(
+      hitBox,
+      alpha
+    );
+  }
+}
+
+  function drawCutPieces(){
+
+    for(const piece of cutPieces){
+
+      const alpha =
+        clamp(
+          piece.life /
+          piece.maximumLife,
+          0,
+          1
+        );
+
+      const width =
+        CFG.boxWidth *
+        piece.scale;
+
+      const height =
+        CFG.boxHeight *
+        piece.scale;
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        alpha;
+
+      ctx.translate(
+        piece.x,
+        piece.y
+      );
+
+      ctx.rotate(
+        piece.rotation
+      );
+
+      ctx.fillStyle =
+        piece.side < 0
+          ? '#d89b57'
+          : '#8c4d29';
+
+      if(
+        piece.cutType ===
+        'vertical'
+      ){
+
+        ctx.fillRect(
+          piece.side < 0
+            ? -width / 2
+            : 0,
+          -height / 2,
+          width / 2,
+          height
+        );
+
+      }else{
+
+        ctx.fillRect(
+          -width / 2,
+          piece.side < 0
+            ? -height / 2
+            : 0,
+          width,
+          height / 2
+        );
+      }
+
+      ctx.strokeStyle =
+        '#fff5c5';
+
+      ctx.lineWidth = 4;
+
+      ctx.beginPath();
+
+      if(
+        piece.cutType ===
+        'vertical'
+      ){
+
+        ctx.moveTo(
+          0,
+          -height / 2
+        );
+
+        ctx.lineTo(
+          0,
+          height / 2
+        );
+
+      }else{
+
+        ctx.moveTo(
+          -width / 2,
+          0
+        );
+
+        ctx.lineTo(
+          width / 2,
+          0
+        );
+      }
+
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  function drawParticles(){
+
+    for(const particle of particles){
+
+      ctx.save();
+
+      ctx.globalAlpha =
+        clamp(
+          particle.life /
+          particle.maximumLife,
+          0,
+          1
+        );
+
+      ctx.fillStyle =
+        particle.color;
+
+      ctx.shadowColor =
+        particle.color;
+
+      ctx.shadowBlur = 7;
+
+      ctx.beginPath();
+
+      ctx.arc(
+        particle.x,
+        particle.y,
+        particle.size,
+        0,
+        TAU
+      );
+
+      ctx.fill();
+
+      ctx.restore();
+    }
+  }
+
+  function drawSlashEffect(){
+
+    if(
+      slashEffectTimer <= 0
+    ){
+
+      return;
+    }
+
+    const progress =
+      1 -
+      slashEffectTimer /
+      CFG.slashEffectSeconds;
+
+    ctx.save();
+
+    ctx.globalAlpha =
+      clamp(
+        1 -
+        progress,
+        0,
+        1
+      );
+
+    ctx.translate(
+      CFG.cutPointX,
+      CFG.cutPointY
+    );
+
+    ctx.strokeStyle =
+      '#efffff';
+
+    ctx.shadowColor =
+      '#70e6ff';
+
+    ctx.shadowBlur = 20;
+
+    ctx.lineWidth =
+      12 -
+      progress * 7;
+
+    ctx.lineCap =
+      'round';
+
+    ctx.beginPath();
+
+    if(
+      slashType ===
+      'vertical'
+    ){
+
+      ctx.moveTo(
+        0,
+        -132
+      );
+
+      ctx.lineTo(
+        0,
+        132
+      );
+
+    }else{
+
+      ctx.moveTo(
+        -66,
+        0
+      );
+
+      ctx.lineTo(
+        66,
+        0
+      );
+    }
+
+    ctx.stroke();
+
+    ctx.restore();
+  }
+
+  /*
+    ========================================
+    HUD
+    ========================================
+  */
+
+  function drawHUD(){
+
+    const progress =
+      resolvedBoxes /
+      CFG.totalBoxes;
+
+    /*
+      和紙風の上部帯。
+    */
+    ctx.fillStyle =
+      'rgba(248,237,211,.91)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      58
+    );
+
+    ctx.fillStyle =
+      '#33251d';
+
+    ctx.fillRect(
+      0,
+      54,
+      W,
+      4
+    );
+
+    ctx.textBaseline =
+      'middle';
+
+    ctx.fillStyle =
+      '#2f211a';
+
+    ctx.textAlign =
+      'left';
+
+    ctx.font =
+      '900 18px sans-serif';
+
+    ctx.fillText(
+      'ボックス・カッター',
+      22,
+      25
+    );
+
+    ctx.textAlign =
+      'right';
+
+    ctx.fillStyle =
+      '#a72f26';
+
+    ctx.font =
+      '900 23px monospace';
+
+    ctx.fillText(
+      'CUT ' +
+      cutCount,
+      W - 22,
+      25
+    );
+
+    /*
+      細い進行線。
+    */
+    ctx.fillStyle =
+      'rgba(65,43,31,.18)';
+
+    ctx.fillRect(
+      22,
+      43,
+      W - 44,
+      5
+    );
+
+    const gauge =
+      ctx.createLinearGradient(
+        22,
+        0,
+        W - 22,
+        0
+      );
+
+    gauge.addColorStop(
+      0,
+      '#d9a335'
+    );
+
+    gauge.addColorStop(
+      0.65,
+      '#e66a36'
+    );
+
+    gauge.addColorStop(
+      1,
+      '#c92d28'
+    );
+
+    ctx.fillStyle =
+      gauge;
+
+    ctx.fillRect(
+      22,
+      43,
+      (
+        W - 44
+      ) *
+      progress,
+      5
+    );
+  }
+
+  function drawPlay(){
+
+    drawStageBackground();
+
+    ctx.save();
+
+    ctx.translate(
+      screenShakeX,
+      screenShakeY
+    );
+
+drawSwordsman();
+drawBoxes();
+drawCutZone();
+
+/*
+  被弾した箱は剣士より手前に描き、
+  頭上へ吹き飛ぶ様子を見せる。
+*/
+drawHitBoxes();
+
+drawCutPieces();
+drawSlashEffect();
+drawParticles();
+    ctx.restore();
+
+    drawHUD();
+
+    if(damageFlashTimer > 0){
+
+      ctx.fillStyle =
+        'rgba(255,47,29,' +
+        (
+          damageFlashTimer /
+          CFG.damageFlashSeconds *
+          0.28
+        ) +
+        ')';
+
+      ctx.fillRect(
+        0,
+        0,
+        W,
+        H
+      );
+    }
+
+    if(CFG.debug){
+
+      ctx.strokeStyle =
+        '#ff00ff';
+
+      ctx.lineWidth = 2;
+
+      ctx.strokeRect(
+        CFG.cutPointX -
+        CFG.cutWindowX,
+        CFG.cutPointY -
+        CFG.cutWindowY,
+        CFG.cutWindowX * 2,
+        CFG.cutWindowY * 2
+      );
+
+      ctx.strokeStyle =
+        '#ffff00';
+
+      ctx.beginPath();
+
+      ctx.moveTo(
+        CFG.recoveryGateX,
+        60
+      );
+
+      ctx.lineTo(
+        CFG.recoveryGateX,
+        H
+      );
+
+      ctx.stroke();
+    }
+  }
+
+  /*
+    ========================================
+    タイトル
+    ========================================
+  */
+
+  function drawTitle(){
+
+    drawStageBackground();
+
+    ctx.save();
+
+    ctx.globalAlpha = 0.58;
+
+    drawSwordsman();
+
+    ctx.restore();
+
+    drawBoxShape({
+      x:735,
+      y:285,
+      rotation:-0.035,
+      scale:0.93,
+      groove:'vertical',
+      final:false,
+      wrongSlash:false
+    },1);
+
+    drawBoxShape({
+      x:840,
+      y:425,
+      rotation:0.04,
+      scale:0.93,
+      groove:'horizontal',
+      final:false,
+      wrongSlash:false
+    },1);
+
+    ctx.fillStyle =
+      'rgba(29,18,13,.58)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+    ctx.fillStyle =
+      '#fff2d0';
+
+    ctx.shadowColor =
+      'rgba(224,78,41,.62)';
+
+    ctx.shadowBlur = 20;
+
+    ctx.font =
+      '900 70px sans-serif';
+
+    ctx.fillText(
+      'ボックス・カッター',
+      W / 2,
+      107
+    );
+
+    ctx.shadowColor =
+      'transparent';
+
+    ctx.shadowBlur = 0;
+
+    ctx.strokeStyle =
+      'rgba(255,222,143,.58)';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      120,
+      167
+    );
+
+    ctx.lineTo(
+      W - 120,
+      167
+    );
+
+    ctx.stroke();
+
+    /*
+      操作説明。
+    */
+    ctx.fillStyle =
+      'rgba(246,233,204,.90)';
+
+    roundedRect(
+      277,
+      216,
+      406,
+      205,
+      12
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#4d3729';
+
+    ctx.lineWidth = 3;
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#33231b';
+
+    ctx.font =
+      '900 25px sans-serif';
+
+    ctx.fillText(
+      '上下キー',
+      388,
+      270
+    );
+
+    ctx.fillStyle =
+      '#aa3027';
+
+    ctx.fillText(
+      '縦斬り',
+      570,
+      270
+    );
+
+    ctx.fillStyle =
+      '#33231b';
+
+    ctx.fillText(
+      '左右キー',
+      388,
+      330
+    );
+
+    ctx.fillStyle =
+      '#aa3027';
+
+    ctx.fillText(
+      '横斬り',
+      570,
+      330
+    );
+
+    ctx.fillStyle =
+      '#5c4535';
+
+    ctx.font =
+      '700 18px sans-serif';
+
+    ctx.fillText(
+      '箱の筋を見て斬る方向を選べ',
+      W / 2,
+      383
+    );
+
+    /*
+      開始。
+    */
+    ctx.fillStyle =
+      '#a72e24';
+
+    roundedRect(
+      W / 2 - 183,
+      500,
+      366,
+      78,
+      13
+    );
+
+    ctx.fill();
+
+    ctx.strokeStyle =
+      '#ffd477';
+
+    ctx.lineWidth = 3;
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '900 29px sans-serif';
+
+    ctx.fillText(
+      'SPACEで開始',
+      W / 2,
+      539
+    );
+  }
+
+  /*
+    ========================================
+    リザルト
+    ========================================
+  */
+
+  function drawResult(){
+
+    drawStageBackground();
+
+    ctx.fillStyle =
+      'rgba(24,15,11,.66)';
+
+    ctx.fillRect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    const rank =
+      getRank();
+
+    const rankColor =
+      getRankColor(
+        rank
+      );
+
+    ctx.textAlign =
+      'center';
+
+    ctx.textBaseline =
+      'middle';
+
+    ctx.fillStyle =
+      '#ffd577';
+
+    ctx.font =
+      '900 29px sans-serif';
+
+    ctx.fillText(
+      'ゲームリザルト',
+      W / 2,
+      76
+    );
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '800 24px sans-serif';
+
+    ctx.fillText(
+      'CUT',
+      W / 2,
+      153
+    );
+
+    ctx.fillStyle =
+      '#fff1d2';
+
+    ctx.font =
+      '900 96px monospace';
+
+    ctx.fillText(
+      cutCount +
+      ' / ' +
+      CFG.totalBoxes,
+      W / 2,
+      235
+    );
+
+    ctx.strokeStyle =
+      'rgba(255,216,143,.42)';
+
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+
+    ctx.moveTo(
+      287,
+      299
+    );
+
+    ctx.lineTo(
+      673,
+      299
+    );
+
+    ctx.stroke();
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '800 23px sans-serif';
+
+    ctx.fillText(
+      'RANK',
+      W / 2,
+      365
+    );
+
+    ctx.fillStyle =
+      rankColor;
+
+    ctx.shadowColor =
+      rankColor;
+
+    ctx.shadowBlur = 25;
+
+    ctx.font =
+      '900 166px serif';
+
+    ctx.fillText(
+      rank,
+      W / 2,
+      466
+    );
+
+    ctx.shadowColor =
+      'transparent';
+
+    ctx.shadowBlur = 0;
+
+    ctx.fillStyle =
+      '#ffffff';
+
+    ctx.font =
+      '700 19px sans-serif';
+
+    ctx.fillText(
+      'SPACEでタイトルへ戻る',
+      W / 2,
+      648
+    );
+  }
+
+  /*
+    ========================================
+    描画
+    ========================================
+  */
+
+  function render(){
+
+    ctx.setTransform(
+      canvasScale,
+      0,
+      0,
+      canvasScale,
+      canvasOffsetX,
+      canvasOffsetY
+    );
+
+    ctx.clearRect(
+      -canvasOffsetX /
+      canvasScale,
+      -canvasOffsetY /
+      canvasScale,
+      canvas.width /
+      canvasScale,
+      canvas.height /
+      canvasScale
+    );
+
+    ctx.save();
+
+    ctx.beginPath();
+
+    ctx.rect(
+      0,
+      0,
+      W,
+      H
+    );
+
+    ctx.clip();
+
+    if(mode === 'title'){
+
+      drawTitle();
+
+    }else if(mode === 'play'){
+
+      drawPlay();
+
+    }else if(mode === 'result'){
+
+      drawResult();
+    }
+
+    ctx.restore();
+  }
+
+  /*
+    ========================================
+    入力
+    ========================================
+  */
+
+  function isVerticalKey(code){
+
+    return (
+      code === 'ArrowUp' ||
+      code === 'ArrowDown'
+    );
+  }
+
+  function isHorizontalKey(code){
+
+    return (
+      code === 'ArrowLeft' ||
+      code === 'ArrowRight'
+    );
+  }
+
+  function keyDown(event){
+
+    if(
+      isVerticalKey(
+        event.code
+      ) ||
+      isHorizontalKey(
+        event.code
+      ) ||
+      event.code === 'Space'
+    ){
+
+      event.preventDefault();
+    }
+
+    if(event.repeat){
+
+      return;
+    }
+
+    if(mode === 'title'){
+
+      if(
+        event.code === 'Space' &&
+        spaceReady
+      ){
+
+        spaceReady = false;
+
+        startGame();
+      }
+
+      return;
+    }
+
+    if(mode === 'play'){
+
+      if(
+        isVerticalKey(
+          event.code
+        )
+      ){
+
+        performSlash(
+          'vertical'
+        );
+
+        return;
+      }
+
+      if(
+        isHorizontalKey(
+          event.code
+        )
+      ){
+
+        performSlash(
+          'horizontal'
+        );
+      }
+
+      return;
+    }
+
+    if(
+      mode === 'result' &&
+      event.code === 'Space' &&
+      spaceReady
+    ){
+
+      spaceReady = false;
+
+      mode = 'title';
+
+boxPlans = [];
+boxes = [];
+cutPieces = [];
+hitBoxes = [];
+particles = [];
+    }
+  }
+
+  function keyUp(event){
+
+    if(
+      event.code === 'Space'
+    ){
+
+      event.preventDefault();
+
+      spaceReady = true;
+    }
+  }
+
+  /*
+    ========================================
+    起動
+    ========================================
+  */
+
+  function resize(){
+
+    if(
+      !root ||
+      !canvas
+    ){
+
+      return;
+    }
+
+    const rect =
+      root.getBoundingClientRect();
+
+    const pixelRatio =
+      Math.min(
+        window.devicePixelRatio ||
+        1,
+        2
+      );
+
+    canvas.width =
+      Math.max(
+        1,
+        Math.round(
+          rect.width *
+          pixelRatio
+        )
+      );
+
+    canvas.height =
+      Math.max(
+        1,
+        Math.round(
+          rect.height *
+          pixelRatio
+        )
+      );
+
+    canvasScale =
+      Math.min(
+        canvas.width / W,
+        canvas.height / H
+      );
+
+    canvasOffsetX =
+      (
+        canvas.width -
+        W *
+        canvasScale
+      ) /
+      2;
+
+    canvasOffsetY =
+      (
+        canvas.height -
+        H *
+        canvasScale
+      ) /
+      2;
+  }
+
+  function focusGame(){
+
+    if(root){
+
+      root.focus();
+    }
+  }
+
+  function gameLoop(timestamp){
+
+    if(destroyed){
+
+      return;
+    }
+
+    const deltaTime =
+      previousTimestamp
+        ? Math.min(
+            0.033,
+            (
+              timestamp -
+              previousTimestamp
+            ) /
+            1000
+          )
+        : 0;
+
+    previousTimestamp =
+      timestamp;
+
+    update(
+      deltaTime
+    );
+
+    render();
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+  }
+
+  function mount(target){
+
+    destroyed = false;
+
+    previousTimestamp = 0;
+
+    root =
+      document.createElement(
+        'div'
+      );
+
+    root.className =
+      'boxc-root';
+
+    root.tabIndex = 0;
+
+    root.setAttribute(
+      'aria-label',
+      'BOX CUTTER'
+    );
+
+    canvas =
+      document.createElement(
+        'canvas'
+      );
+
+    root.appendChild(
+      canvas
+    );
+
+    target.appendChild(
+      root
+    );
+
+    ctx =
+      canvas.getContext(
+        '2d'
+      );
+
+    resize();
+
+    window.addEventListener(
+      'keydown',
+      keyDown,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'keyup',
+      keyUp,
+      {
+        passive:false
+      }
+    );
+
+    window.addEventListener(
+      'resize',
+      resize
+    );
+
+    root.addEventListener(
+      'pointerdown',
+      focusGame
+    );
+
+    animationFrame =
+      requestAnimationFrame(
+        gameLoop
+      );
+
+    setTimeout(
+      focusGame,
+      0
+    );
+  }
+
+  function destroy(){
+
+    if(destroyed){
+
+      return;
+    }
+
+    destroyed = true;
+
+    cancelAnimationFrame(
+      animationFrame
+    );
+
+    window.removeEventListener(
+      'keydown',
+      keyDown
+    );
+
+    window.removeEventListener(
+      'keyup',
+      keyUp
+    );
+
+    window.removeEventListener(
+      'resize',
+      resize
+    );
+
+    if(root){
+
+      root.removeEventListener(
+        'pointerdown',
+        focusGame
+      );
+
+      root.remove();
+    }
+
+    root = null;
+    canvas = null;
+    ctx = null;
+
+boxPlans = [];
+boxes = [];
+cutPieces = [];
+hitBoxes = [];
+particles = [];
+  }
+
+  return {
+    mount:mount,
+    destroy:destroy
+  };
+}
+
+const game = {
+
+  id:GAME_ID,
+
+  name:
+    'ボックス・カッター',
+
+  title:
+    'ボックス・カッター',
+
+  description:
+    '飛来する箱の筋を見極め、上下キーの縦斬りと左右キーの横斬りで切断する反応ゲーム。',
+
+  controls:
+    '上下キー：縦斬り　左右キー：横斬り　SPACE：開始・タイトルへ戻る',
+
+  orientation:
+    'landscape',
+
+  aspectRatio:
+    '4:3',
+
+  instance:null,
+
+  mount:function(target){
+
+    this.destroy();
+
+    this.instance =
+      createGame();
+
+    this.instance.mount(
+      target
+    );
+  },
+
+  destroy:function(){
+
+    if(this.instance){
+
+      this.instance.destroy();
+
+      this.instance = null;
+    }
+  }
+};
+
+if(
+  window.MiniGames &&
+  typeof
+  window.MiniGames.register ===
+  'function'
+){
+
+  window.MiniGames.register(
+    game
+  );
+
+}else{
+
+  document.documentElement.style.width =
+    '100%';
+
+  document.documentElement.style.height =
+    '100%';
+
+  document.body.style.cssText =
+    'margin:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'overflow:hidden;' +
+    'background:#000;';
+
+  const host =
+    document.createElement(
+      'div'
+    );
+
+  host.style.cssText =
+    'position:fixed;' +
+    'inset:0;' +
+    'width:100%;' +
+    'height:100%;' +
+    'background:#000;';
+
+  document.body.appendChild(
+    host
+  );
+
+  game.mount(
+    host
+  );
+}
+
+})();
+</script>
 <!-- ==================================================================================== GAME BLOCK 13 END ==================================================================================== -->
 
 
 
 
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 14
+     タイトル
+======================================================================================================================================================================================================= -->
+
+<!-- ==================================================================================== GAME BLOCK 14 END ==================================================================================== -->
+
+
+
+
+
+
+<!-- =======================================================================================================================================================================================================
+     🎮 GAME BLOCK 15
+     タイトル
+======================================================================================================================================================================================================= -->
+
+<!-- ==================================================================================== GAME BLOCK 15 END ==================================================================================== -->
 
 
 
